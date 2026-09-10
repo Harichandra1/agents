@@ -1,0 +1,28 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+
+# Secrets — never commit. Use .env.example as the template.
+.env
+
+# OS / editor junk
+.DS_Store
+Icon?
+.vscode/
+
+# Scratch output from example runs
+Output*.md
+
+# NOTE: uv.lock is intentionally NOT ignored. This is an application, not a
+# library, so the lock file is committed to keep CI (Day 22) reproducible.
+
+# Test / lint caches
+.pytest_cache/
+.ruff_cache/
