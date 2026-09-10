@@ -85,6 +85,11 @@ Everything reads from `src/harness/config.py`, overridable via env or `.env`:
 | `HARNESS_MODEL` | `openai:gpt-5.6-luna` | Main chat model |
 | `HARNESS_SUMMARIZER` | same as above | Compaction/summarisation (Day 9 splits this) |
 | `HARNESS_TEMPERATURE` | `0` | Default temperature |
+| `HARNESS_REASONING_EFFORT` | `none` | Required for gpt-5.x when binding tools (see below) |
+
+> **Why `reasoning_effort=none`:** the gpt-5.x reasoning models reject function
+> tools on `/v1/chat/completions` unless reasoning effort is `none`. Every day
+> from Day 1 on binds tools, so `config.py` sets it once for the whole repo.
 
 ## Week 1 history
 

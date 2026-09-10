@@ -80,4 +80,13 @@ Day 4 bugs above, plus a dependency one: `pyproject.toml` listed `dotenv`
 `python-dotenv` — imports had been working only because something else pulled
 the real one in transitively.
 
-**Rule adopted:** merge each day into `main` the same day.
+One more thing surfaced only under a live run, which the offline tests could
+not have caught: `gpt-5.6-luna` is a reasoning model, and OpenAI rejects
+function tools on `/v1/chat/completions` unless `reasoning_effort` is `"none"`.
+Every day from Day 1 onward binds tools, so all five were affected. Fixing it
+touched exactly one file — which is the clearest argument for centralising
+model construction that I could have asked for.
+
+**Rules adopted:** merge each day into `main` the same day; and run the
+example, not just the tests — scripted fake models cannot catch a
+provider-side 400.
