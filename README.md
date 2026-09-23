@@ -17,6 +17,7 @@ src/harness/          the patterns, importable
   fanout.py           Day 3  Send fan-out -> judge -> select
   subagents.py        Day 4  delegation with context isolation
   context/            Day 5  lazy tools, scratchpad, compaction
+  memory.py           Day 7  long-term memory + short-term graph state
   tools/              tool definitions shared across days
 examples/             one runnable demo per day
 tests/                offline tests (no API key needed)
@@ -42,7 +43,7 @@ uv run python examples/day01_loop.py          # bare loop vs. graph
 uv run python examples/day02_planner.py       # add --auto to skip the approval prompt
 uv run python examples/day03_fanout.py        # parallel branches + judge
 uv run python examples/day04_subagents.py     # direct vs. delegated
-uv run python examples/day05_context.py       # lazy tools + scratchpad + compaction
+uv run python examples/day07_memory.py        # user memory via LangGraph store
 ```
 
 These call a real model and need `OPENAI_API_KEY`.
@@ -56,25 +57,29 @@ uv run pytest -q
 uv run ruff check src examples tests
 ```
 
-## Day 5 architecture
+## Day 7 architecture
 
 ```mermaid
 flowchart TD
-    START([START]) --> COMPACT[compact]
-    COMPACT --> AGENT[agent<br/>binds always-on + loaded tools]
-    AGENT -->|tool calls| TOOLS[ToolNode]
-    TOOLS --> COMPACT
-    AGENT -->|no tool calls| DONE([END])
+    USER[User message] --> STATE[Short-term state<br/>messages + llm_calls]
+    STATE --> LLM[llm_call]
+    LLM -->|tool calls| TOOLS[ToolNode]
+    TOOLS --> STATE
+    LLM -->|no tool calls| DONE([END])
 
-    TOOLS --> SCRATCH[(scratchpad)]
-    COMPACT --> SUM[summarizer LLM<br/>only past threshold]
-    SUM --> COMPACT
+    LLM --> SEARCH[Long-term memory<br/>store.search by user]
+    SEARCH --> MEMORY[(User memory store)]
+    MEMORY --> PROMPT[Prompt injects relevant memories]
+    PROMPT --> LLM
+
+    LLM --> SAVE[save_memory]
+    SAVE --> MEMORY
 ```
 
-`compact` runs before **every** agent call, not just after tool runs —
-otherwise a long tool-free conversation would never compact. It is a no-op
-until the message list passes both configured limits (default: keep the last
-6 messages, compact past ~3,000 estimated tokens).
+Short-term memory is the graph state: recent messages and tool-call count. Long-term
+memory is the persisted user namespace in `runtime.store`, keyed by `user_id` and
+searched before the model responds. The demo stores only simple facts like
+"my name is ..." and retrieves them later when relevant.
 
 ## Configuration
 

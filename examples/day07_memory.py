@@ -5,7 +5,7 @@ from harness.memory import build_loop_graph
 
 
 def main() -> None:
-    question = "Hi my name is Hari do this task for me , Add 3 and 4, then multiply the result by 5."
+    question = "Tell me about Tottenham Hotspur in the london" 
 
     print("\n=== same thing as a StateGraph ===")
     config={
@@ -23,14 +23,12 @@ def main() -> None:
         message.pretty_print()
     print(f"\nllm_calls: {result['llm_calls']}")
 
-    print("\n=== Now testing the checkpointer working capability ===")
-    result = graph.invoke(
-        {"messages": [HumanMessage(content="What is my Name?")]},
-        context={"user_id":"hari-123"},
-        config=config
+    print("\n=== Cache note ===")
+    print(
+        "OpenAI prompt caching is automatic and model/account dependent. "
+        "If this model/account does not expose cache metadata, the correct result is "
+        "a zero cache_read value even when the request is otherwise valid."
     )
-    for message in result["messages"]:
-        message.pretty_print()
 
 
 if __name__ == "__main__":
