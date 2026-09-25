@@ -174,6 +174,36 @@ def test_subagent_delegates_and_synthesizes(scripted):
     assert result["messages"][-1].content == "synthesized final answer"
 
 
+def test_routing_graph_injects_state_and_runtime(scripted):
+    from unittest.mock import patch
+
+    from harness.routing import build_loop_graph as build_routing_graph
+
+    routing_llm = scripted([
+        {"routing_model": "openai:gpt-5.6-luna", "reasoning_effort": "low"}
+    ])
+    llm = scripted(
+        [
+            AIMessage(content="", tool_calls=[tool_call("add", {"a": 45, "b": 67})]),
+            AIMessage(content="112"),
+        ]
+    )
+
+    with patch("harness.routing.get_routing_model", return_value=routing_llm), patch(
+        "harness.routing.get_chat_model", return_value=llm
+    ):
+        result = build_routing_graph().invoke(
+            {"messages": [HumanMessage(content="Add 45 and 67")], "llm_calls": 0},
+            context={"user_id": "user-42"},
+            config={"configurable": {"thread_id": "routing-graph-test"}},
+        )
+
+    assert result["llm_calls"] == 2
+    assert "cost" in result
+    assert result["cost"] >= 0
+    assert result["messages"][-1].content == "112"
+
+
 def test_subagent_answers_directly_without_delegating(scripted):
     parent = scripted([{"action": "respond", "tasks": [], "response": "direct answer"}])
 

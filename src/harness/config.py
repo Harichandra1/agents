@@ -7,15 +7,30 @@ from langchain.chat_models import init_chat_model
 
 load_dotenv()
 
+LOW_MODEL = {
+    "model": "gpt-5.6-luna",
+    "reasoning": {"effort": "low"},
+}
+
+MEDIUM_MODEL = {
+    "model": "gpt-5.6-terra",
+    "reasoning": {"effort": "medium"},
+}
+
+HIGH_MODEL = {
+    "model": "gpt-5.6-sol",
+    "reasoning": {"effort": "high"},
+}
+
 DEFAULT_MODEL = os.getenv(
     "HARNESS_MODEL",
     "openai:gpt-5.6-luna",
 )
-
-SUMMARIZER_MODEL = os.getenv(
-    "HARNESS_SUMMARIZER",
-    DEFAULT_MODEL,
+ROUTING_MODEL = os.getenv(
+    "HARNESS_ROUTING_MODEL",
+    "openai:gpt-4o-mini"
 )
+
 
 DEFAULT_TEMPERATURE = float(
     os.getenv("HARNESS_TEMPERATURE", "0")
@@ -29,7 +44,7 @@ DEFAULT_REASONING_EFFORT = os.getenv(
 PROMPT_CACHE_ENABLED = (
     os.getenv(
         "HARNESS_PROMPT_CACHE_ENABLED",
-        "true",
+        "false",
     ).lower()
     == "true"
 )
@@ -81,7 +96,7 @@ def get_chat_model(
 
 
 def get_summarizer_model(**kwargs):
-    model_id = SUMMARIZER_MODEL
+    model_id = DEFAULT_MODEL
 
     kwargs = _defaults(
         model_id,
@@ -93,6 +108,17 @@ def get_summarizer_model(**kwargs):
         **kwargs,
     )
 
+def get_routing_model(**kwargs):
+    model_id = ROUTING_MODEL
+    kwargs = _defaults(
+        model_id,
+        kwargs,
+    )
+
+    return init_chat_model(
+        model_id,
+        **kwargs,
+    )
 
 def get_prompt_cache_key() -> str | None:
     if not PROMPT_CACHE_ENABLED:

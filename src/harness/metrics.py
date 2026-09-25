@@ -36,6 +36,11 @@ def extract_usage(response) -> dict[str, int]:
     both the canonical cache_* keys and the older OpenAI aliases.
     """
     usage = getattr(response, "usage_metadata", None) or {}
+    if not usage:
+        metadata = getattr(response, "response_metadata", None) or {}
+        usage = metadata.get("usage") or metadata.get("token_usage") or {}
+    if not usage and isinstance(response, dict):
+        usage = response.get("usage_metadata") or response.get("usage") or {}
 
     input_tokens = usage.get("input_tokens", 0)
     output_tokens = usage.get("output_tokens", 0)
