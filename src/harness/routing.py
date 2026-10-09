@@ -24,6 +24,7 @@ from harness.config import (
 
 from harness.metrics import LLMMetrics, extract_usage
 from harness.config import get_routing_model
+from harness.tools import sandboxing
 
 try:
     from harness.tools import ARITHMETIC_TOOLS
@@ -145,8 +146,9 @@ class Context:
 def build_loop_graph(llm=None):
     """The same loop as a StateGraph: agent node -> tool node -> back."""
     llm = llm or get_chat_model()
-    model_with_tools = llm.bind_tools(ARITHMETIC_TOOLS)
-    tools_by_name = {t.name: t for t in ARITHMETIC_TOOLS}
+    ALL_TOOLS = ARITHMETIC_TOOLS+[sandboxing]
+    model_with_tools = llm.bind_tools(ALL_TOOLS)
+    tools_by_name = {t.name if hasattr(t, "name") else t.__name__: t for t in ALL_TOOLS}
     # short-term memory
     checkpointer = InMemorySaver()
     store = InMemoryStore()
