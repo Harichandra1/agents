@@ -26,3 +26,8 @@ Output*.md
 # Test / lint caches
 .pytest_cache/
 .ruff_cache/
+
+# Environment files containing secrets
+.env.dev
+.env.prod
+.env.staging
