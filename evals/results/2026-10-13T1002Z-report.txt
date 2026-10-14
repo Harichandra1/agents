@@ -1,0 +1,37 @@
+CUSTOM EVAL REPORT
+========================================================================
+id                           tier          result pytest files calls
+------------------------------------------------------------------------
+001-sum-of-squares           easy          PASS   ok     ok    5/16
+002-is-anagram               easy          PASS   ok     ok    6/16
+003-clamp                    easy          PASS   ok     ok    6/16
+004-fizzbuzz-counts          easy          PASS   ok     ok    6/16
+005-inclusive-range          easy          PASS   ok     ok    5/16
+006-palindrome               easy          PASS   ok     ok    5/16
+007-safe-div                 medium        PASS   ok     ok    6/16
+008-squish                   medium        PASS   ok     ok    5/16
+009-mean-empty               medium        PASS   ok     ok    5/16
+010-config-missing           medium        PASS   ok     ok    5/16
+011-csv-header               medium        PASS   ok     ok    6/16
+012-title-case               medium        PASS   ok     ok    6/16
+013-median-copy              medium        PASS   ok     ok    6/16
+014-parser-and-caller        hard          PASS   ok     ok    6/24
+015-moving-average           hard          PASS   ok     ok    5/24
+016-config-env               hard          PASS   ok     ok    6/24
+017-wrong-file-named         adversarial   PASS   ok     ok    8/20
+018-wrong-new-module         adversarial   FAIL   ok     FAIL  7/20
+------------------------------------------------------------------------
+Total: 17/18
+  easy          6/6
+  medium        7/7
+  hard          3/3
+  adversarial   1/2
+
+FAILURES
+------------------------------------------------------------------------
+  018-wrong-new-module
+    - missing: toybox/mathutil.py must contain 'def doubled'
+    plan: Inspect the repository structure and existing package/module conventions, including how toybox exports functions and how tests import them. | Create `toybox/extra.py` defining `doubled(x)` to return `2 * x`. | Wire the new function into the package’s public API if needed based on existing conventions. | Review `tests/test_018_doubled.py` and run the relevant test (or the full test suite) to verify it passes.
+
+JSONL:  /Users/hari/Developer/Thread/AI/agent-harness-code-snippets/Agents/evals/results/2026-10-13T1002Z.jsonl
+Report: /Users/hari/Developer/Thread/AI/agent-harness-code-snippets/Agents/evals/results/2026-10-13T1002Z-report.txt

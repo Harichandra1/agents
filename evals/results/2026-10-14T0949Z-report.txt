@@ -1,0 +1,17 @@
+CUSTOM EVAL REPORT
+========================================================================
+id                           tier          result pytest files calls
+------------------------------------------------------------------------
+018-wrong-new-module         adversarial   FAIL   ok     FAIL  9/20
+------------------------------------------------------------------------
+Total: 0/1
+  adversarial   0/1
+
+FAILURES
+------------------------------------------------------------------------
+  018-wrong-new-module
+    - missing: toybox/mathutil.py must contain 'def doubled'
+    plan: Inspect the repository structure and existing package/module conventions, including how toybox exports functions and how tests import them. | Create `toybox/extra.py` defining `doubled(x)` to return `2 * x`. | Wire `doubled` into the package only if needed based on the existing import conventions. | Review `tests/test_018_doubled.py` and run the relevant test suite to verify it passes.
+
+JSONL:  /Users/hari/Developer/Thread/AI/agent-harness-code-snippets/Agents/evals/results/2026-10-14T0949Z.jsonl
+Report: /Users/hari/Developer/Thread/AI/agent-harness-code-snippets/Agents/evals/results/2026-10-14T0949Z-report.txt

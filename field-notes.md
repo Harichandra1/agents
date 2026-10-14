@@ -90,3 +90,15 @@ model construction that I could have asked for.
 **Rules adopted:** merge each day into `main` the same day; and run the
 example, not just the tests — scripted fake models cannot catch a
 provider-side 400.
+
+---
+
+## Week 3 — Minimal harness + baseline
+
+### Day 15 — Custom eval set
+
+Authored 18 tasks against `evals/tasks/toy_repo`, scored by pytest +
+`file_contains`, not an LLM judge. Stock repo is required to fail every task
+(`evals/runner.py --validate`) so the suite cannot be vacuously green. 017/018
+are adversarial: the prompt names the wrong file; tests still import
+`toybox.mathutil`. Do not record a baseline number today — that is Day 16.

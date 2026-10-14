@@ -19,6 +19,8 @@ Icon?
 
 # Scratch output from example runs
 Output*.md
+.harness-workspace/
+examples/workspace/
 
 # NOTE: uv.lock is intentionally NOT ignored. This is an application, not a
 # library, so the lock file is committed to keep CI (Day 22) reproducible.
