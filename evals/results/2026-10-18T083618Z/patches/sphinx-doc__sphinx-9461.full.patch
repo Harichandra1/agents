@@ -1,0 +1,71 @@
+diff --git a/sphinx/ext/autodoc/importer.py b/sphinx/ext/autodoc/importer.py
+index 1a8ea0973..7a4409b9a 100644
+--- a/sphinx/ext/autodoc/importer.py
++++ b/sphinx/ext/autodoc/importer.py
+@@ -18,7 +18,7 @@ from sphinx.ext.autodoc.mock import ismock, undecorate
+ from sphinx.pycode import ModuleAnalyzer, PycodeError
+ from sphinx.util import logging
+ from sphinx.util.inspect import (getannotations, getmro, getslots, isclass, isenumclass,
+-                                 safe_getattr)
++                                 isproperty, safe_getattr)
+ 
+ if False:
+     # For type annotation
+@@ -74,6 +74,33 @@ def import_module(modname: str, warningiserror: bool = False) -> Any:
+         raise ImportError(exc, traceback.format_exc()) from exc
+ 
+ 
++def _get_classmethod_property(subject: Any, name: str) -> Any:
++    """Return the property wrapped by a classmethod descriptor, if any."""
++    if not isclass(subject):
++        return None
++
++    # A class property can be defined on the class itself (or one of its
++    # bases), or on its metaclass.  Stop at the first definition so an
++    # overriding attribute is not mistaken for an inherited class property.
++    for cls in getmro(subject):
++        namespace = safe_getattr(cls, '__dict__', {})
++        if name in namespace:
++            member = namespace[name]
++            if isinstance(member, classmethod) and isproperty(member.__func__):
++                return member.__func__
++            break
++    else:
++        for cls in getmro(type(subject)):
++            namespace = safe_getattr(cls, '__dict__', {})
++            if name in namespace:
++                member = namespace[name]
++                if isinstance(member, classmethod) and isproperty(member.__func__):
++                    return member.__func__
++                break
++
++    return None
++
++
+ def import_object(modname: str, objpath: List[str], objtype: str = '',
+                   attrgetter: Callable[[Any, str], Any] = safe_getattr,
+                   warningiserror: bool = False) -> Any:
+@@ -107,7 +134,11 @@ def import_object(modname: str, objpath: List[str], objtype: str = '',
+             parent = obj
+             logger.debug('[autodoc] getattr(_, %r)', attrname)
+             mangled_name = mangle(obj, attrname)
+-            obj = attrgetter(obj, mangled_name)
++            class_property = _get_classmethod_property(obj, mangled_name)
++            if class_property is not None:
++                obj = class_property
++            else:
++                obj = attrgetter(obj, mangled_name)
+ 
+             try:
+                 logger.debug('[autodoc] => %r', obj)
+@@ -274,7 +305,9 @@ def get_class_members(subject: Any, objpath: List[str], attrgetter: Callable
+     # other members
+     for name in dir(subject):
+         try:
+-            value = attrgetter(subject, name)
++            value = _get_classmethod_property(subject, name)
++            if value is None:
++                value = attrgetter(subject, name)
+             if ismock(value):
+                 value = undecorate(value)
+ 

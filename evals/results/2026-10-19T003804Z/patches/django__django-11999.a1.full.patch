@@ -1,0 +1,93 @@
+diff --git a/django/db/models/fields/__init__.py b/django/db/models/fields/__init__.py
+index ee45bb941e..e5a7cd144e 100755
+--- a/django/db/models/fields/__init__.py
++++ b/django/db/models/fields/__init__.py
+@@ -763,8 +763,28 @@ class Field(RegisterLookupMixin):
+             if not getattr(cls, self.attname, None):
+                 setattr(cls, self.attname, self.descriptor_class(self))
+         if self.choices is not None:
+-            setattr(cls, 'get_%s_display' % self.name,
+-                    partialmethod(cls._get_FIELD_display, field=self))
++            display_method = 'get_%s_display' % self.name
++            # An inherited generated method may refer to a field on an
++            # abstract model. Replace it with one bound to this field, but
++            # preserve inherited user-defined overrides.
++            display_method_value = cls.__dict__.get(display_method)
++            if display_method not in cls.__dict__:
++                for base in cls.__mro__[1:]:
++                    if display_method in base.__dict__:
++                        display_method_value = base.__dict__[display_method]
++                        break
++            inherited_generated_method = (
++                isinstance(display_method_value, partialmethod) and
++                getattr(display_method_value.func, '__name__', None) == '_get_FIELD_display'
++            )
++            if (
++                not (
++                    callable(display_method_value) or
++                    isinstance(display_method_value, (classmethod, staticmethod, partialmethod))
++                ) or inherited_generated_method
++            ):
++                setattr(cls, display_method,
++                        partialmethod(cls._get_FIELD_display, field=self))
+ 
+     def get_filter_kwargs_for_object(self, obj):
+         """
+diff --git a/tests/model_fields/tests.py b/tests/model_fields/tests.py
+index 0d6e930b06..b44a070e6d 100755
+--- a/tests/model_fields/tests.py
++++ b/tests/model_fields/tests.py
+@@ -162,6 +162,53 @@ class GetFieldDisplayTests(SimpleTestCase):
+         self.assertEqual(Whiz(c='').get_c_display(), '')        # Empty value
+         self.assertEqual(WhizDelayed(c=0).get_c_display(), 'Other')  # Delayed choices
+ 
++    def test_overriding_FIELD_display(self):
++        class FieldBeforeMethod(models.Model):
++            field = models.CharField(max_length=8, choices=[('a', 'A')])
++
++            def get_field_display(self):
++                return 'overridden'
++
++            class Meta:
++                app_label = 'model_fields'
++
++        class MethodBeforeField(models.Model):
++            def get_field_display(self):
++                return 'overridden'
++
++            field = models.CharField(max_length=8, choices=[('a', 'A')])
++
++            class Meta:
++                app_label = 'model_fields'
++
++        class DisplayOverrideMixin:
++            def get_field_display(self):
++                return 'inherited override'
++
++        class InheritedOverride(DisplayOverrideMixin, models.Model):
++            field = models.CharField(max_length=8, choices=[('a', 'A')])
++
++            class Meta:
++                app_label = 'model_fields'
++
++        class AbstractChoices(models.Model):
++            field = models.CharField(max_length=8, choices=[('a', 'Parent')])
++
++            class Meta:
++                abstract = True
++                app_label = 'model_fields'
++
++        class AbstractChoicesOverride(AbstractChoices):
++            field = models.CharField(max_length=8, choices=[('b', 'Child')])
++
++            class Meta:
++                app_label = 'model_fields'
++
++        self.assertEqual(FieldBeforeMethod(field='a').get_field_display(), 'overridden')
++        self.assertEqual(MethodBeforeField(field='a').get_field_display(), 'overridden')
++        self.assertEqual(InheritedOverride(field='a').get_field_display(), 'inherited override')
++        self.assertEqual(AbstractChoicesOverride(field='b').get_field_display(), 'Child')
++
+     def test_get_FIELD_display_translated(self):
+         """A translated display value is coerced to str."""
+         val = Whiz(c=5).get_c_display()

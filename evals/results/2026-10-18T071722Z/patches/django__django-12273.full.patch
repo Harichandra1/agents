@@ -1,0 +1,36 @@
+diff --git a/django/db/models/base.py b/django/db/models/base.py
+index 844c01e95e..127ed63ce4 100644
+--- a/django/db/models/base.py
++++ b/django/db/models/base.py
+@@ -779,6 +779,21 @@ class Model(metaclass=ModelBase):
+         with context_manager:
+             parent_inserted = False
+             if not raw:
++                if (
++                    not self._state.adding and
++                    (
++                        self.pk is None or
++                        any(getattr(self, parent._meta.pk.attname) is None for parent in meta.parents)
++                    )
++                ):
++                    # Clearing a parent primary key of a saved instance means
++                    # that it should be saved as a new object. Reset all parent
++                    # links as well, otherwise a multi-table inherited model
++                    # would attempt to reuse its existing parent rows.
++                    for parent, field in meta.parents.items():
++                        setattr(self, parent._meta.pk.attname, None)
++                        if field:
++                            setattr(self, field.attname, None)
+                 parent_inserted = self._save_parents(cls, using, update_fields)
+             updated = self._save_table(
+                 raw, cls, force_insert or parent_inserted,
+@@ -804,7 +819,8 @@ class Model(metaclass=ModelBase):
+         inserted = False
+         for parent, field in meta.parents.items():
+             # Make sure the link fields are synced between parent and self.
+-            if (field and getattr(self, parent._meta.pk.attname) is None and
++            if (field and self._state.adding and
++                    getattr(self, parent._meta.pk.attname) is None and
+                     getattr(self, field.attname) is not None):
+                 setattr(self, parent._meta.pk.attname, getattr(self, field.attname))
+             parent_inserted = self._save_parents(cls=parent, using=using, update_fields=update_fields)

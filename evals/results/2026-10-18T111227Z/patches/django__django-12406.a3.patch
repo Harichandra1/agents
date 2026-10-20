@@ -1,0 +1,18 @@
+diff --git a/django/db/models/fields/related.py b/django/db/models/fields/related.py
+index f269d9e17f..70b58fdc7c 100644
+--- a/django/db/models/fields/related.py
++++ b/django/db/models/fields/related.py
+@@ -975,6 +975,13 @@ class ForeignKey(ForeignObject):
+             raise ValueError("Cannot create form field for %r yet, because "
+                              "its related model %r has not been loaded yet" %
+                              (self.name, self.remote_field.model))
++        widget = kwargs.get('widget')
++        if not self.blank and (
++            widget is forms.RadioSelect or
++            isinstance(widget, forms.RadioSelect) or
++            isinstance(widget, type) and issubclass(widget, forms.RadioSelect)
++        ):
++            kwargs.setdefault('empty_label', None)
+         return super().formfield(**{
+             'form_class': forms.ModelChoiceField,
+             'queryset': self.remote_field.model._default_manager.using(using),

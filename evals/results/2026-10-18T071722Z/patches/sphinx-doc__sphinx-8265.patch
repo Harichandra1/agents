@@ -1,0 +1,22 @@
+diff --git a/sphinx/pycode/ast.py b/sphinx/pycode/ast.py
+index 9bafff11c..f78aa6762 100644
+--- a/sphinx/pycode/ast.py
++++ b/sphinx/pycode/ast.py
+@@ -85,10 +85,15 @@ class _UnparseVisitor(ast.NodeVisitor):
+         """Unparse a single argument to a string."""
+         name = self.visit(arg)
+         if default:
++            default_value = self.visit(default)
++            if isinstance(default, ast.Tuple) and default.elts:
++                if len(default.elts) == 1:
++                    default_value += ","
++                default_value = "(%s)" % default_value
+             if arg.annotation:
+-                name += " = %s" % self.visit(default)
++                name += " = %s" % default_value
+             else:
+-                name += "=%s" % self.visit(default)
++                name += "=%s" % default_value
+         return name
+ 
+     def visit_arguments(self, node: ast.arguments) -> str:

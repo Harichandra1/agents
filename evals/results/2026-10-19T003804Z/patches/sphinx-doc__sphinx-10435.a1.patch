@@ -1,0 +1,20 @@
+diff --git a/sphinx/writers/latex.py b/sphinx/writers/latex.py
+index e0c7d56f8..a5049d98e 100644
+--- a/sphinx/writers/latex.py
++++ b/sphinx/writers/latex.py
+@@ -1710,9 +1710,14 @@ class LaTeXTranslator(SphinxTranslator):
+         # TODO: Use nowrap option once LaTeX formatter supports it
+         # https://github.com/pygments/pygments/pull/1343
+         hlcode = hlcode.replace(r'\begin{Verbatim}[commandchars=\\\{\}]',
+-                                r'\sphinxcode{\sphinxupquote{')
++                                r'\sphinxcode{\sphinxupquote{%')
+         # get consistent trailer
+         hlcode = hlcode.rstrip()[:-14]  # strip \end{Verbatim}
++        # Discard the line break before the trailer and comment out the one
++        # after the opening macro and code, to avoid adding spaces in the PDF.
++        if hlcode.endswith(CR):
++            hlcode = hlcode[:-len(CR)]
++        hlcode += '%' + CR
+         self.body.append(hlcode)
+         self.body.append('}}')
+         raise nodes.SkipNode

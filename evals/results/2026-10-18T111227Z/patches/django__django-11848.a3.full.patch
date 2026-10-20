@@ -1,0 +1,52 @@
+diff --git a/django/utils/http.py b/django/utils/http.py
+index 572cfb4347..cd61230423 100755
+--- a/django/utils/http.py
++++ b/django/utils/http.py
+@@ -176,7 +176,12 @@ def parse_http_date(date):
+     try:
+         year = int(m.group('year'))
+         if year < 100:
+-            if year < 70:
++            if m.re is RFC850_DATE:
++                current_year = datetime.datetime.utcnow().year
++                year += current_year - current_year % 100
++                if year > current_year + 50:
++                    year -= 100
++            elif year < 70:
+                 year += 2000
+             else:
+                 year += 1900
+diff --git a/tests/utils_tests/test_http.py b/tests/utils_tests/test_http.py
+index bc8bcfe977..a384dd0964 100755
+--- a/tests/utils_tests/test_http.py
++++ b/tests/utils_tests/test_http.py
+@@ -1,5 +1,6 @@
+ import unittest
+ from datetime import datetime
++from unittest import mock
+ 
+ from django.test import SimpleTestCase, ignore_warnings
+ from django.utils.datastructures import MultiValueDict
+@@ -320,6 +321,22 @@ class HttpDateProcessingTests(unittest.TestCase):
+         parsed = parse_http_date('Sunday, 06-Nov-94 08:49:37 GMT')
+         self.assertEqual(datetime.utcfromtimestamp(parsed), datetime(1994, 11, 6, 8, 49, 37))
+ 
++    def test_parsing_rfc850_year_more_than_50_years_ahead(self):
++        class MockDateTime(datetime):
++            @classmethod
++            def utcnow(cls):
++                return cls(2018, 1, 1)
++
++        with mock.patch('django.utils.http.datetime.datetime', MockDateTime):
++            tests = (
++                ('Sunday, 06-Nov-68 08:49:37 GMT', 2068),
++                ('Sunday, 06-Nov-69 08:49:37 GMT', 1969),
++                ('Sunday, 06-Nov-70 08:49:37 GMT', 1970),
++            )
++            for date, year in tests:
++                parsed = parse_http_date(date)
++                self.assertEqual(datetime.utcfromtimestamp(parsed).year, year)
++
+     def test_parsing_asctime(self):
+         parsed = parse_http_date('Sun Nov  6 08:49:37 1994')
+         self.assertEqual(datetime.utcfromtimestamp(parsed), datetime(1994, 11, 6, 8, 49, 37))

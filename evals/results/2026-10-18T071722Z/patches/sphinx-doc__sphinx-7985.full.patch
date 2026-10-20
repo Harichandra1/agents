@@ -1,0 +1,67 @@
+diff --git a/sphinx/builders/linkcheck.py b/sphinx/builders/linkcheck.py
+index dd5317087..a13146793 100644
+--- a/sphinx/builders/linkcheck.py
++++ b/sphinx/builders/linkcheck.py
+@@ -9,6 +9,7 @@
+ """
+ 
+ import json
++import posixpath
+ import queue
+ import re
+ import socket
+@@ -213,7 +214,10 @@ class CheckExternalLinksBuilder(Builder):
+             if len(uri) == 0 or uri.startswith(('#', 'mailto:', 'ftp:')):
+                 return 'unchecked', '', 0
+             elif not uri.startswith(('http:', 'https:')):
+-                return 'local', '', 0
++                if self.check_local_uri(uri, docname):
++                    return 'local', '', 0
++                else:
++                    return 'broken', __('Local file not found'), 0
+             elif uri in self.good:
+                 return 'working', 'old', 0
+             elif uri in self.broken:
+@@ -299,6 +303,42 @@ class CheckExternalLinksBuilder(Builder):
+                              lineno, uri + ' to ' + info)
+             self.write_linkstat(linkstat)
+ 
++    def check_local_uri(self, uri: str, docname: str) -> bool:
++        """Check that a local link points to a document or file in the source tree."""
++        parsed = urlparse(uri)
++        if parsed.scheme or not parsed.path:
++            return True
++
++        source = self.env.doc2path(docname, None)
++        base = posixpath.dirname(source.replace('\\', '/'))
++        target_path = unquote(parsed.path)
++        if target_path.startswith('/'):
++            target = posixpath.normpath(target_path.lstrip('/'))
++        else:
++            target = posixpath.normpath(posixpath.join(base, target_path))
++        if target.startswith('../') or target == '..':
++            # Links outside the source directory cannot be checked reliably.
++            return True
++
++        if path.isfile(path.join(self.srcdir, target)):
++            return True
++        if self.env.path2doc(target) in self.env.found_docs:
++            return True
++
++        # HTML links commonly name the generated document (e.g. other.html),
++        # while the source document has no HTML suffix.
++        suffix = self.config.html_file_suffix or '.html'
++        candidates = [target]
++        if target.endswith(suffix):
++            candidates.append(target[:-len(suffix)])
++        if parsed.path.endswith('/') or path.isdir(path.join(self.srcdir, target)):
++            candidates.append(posixpath.join(target, 'index'))
++        for candidate in candidates:
++            if candidate in self.env.found_docs:
++                return True
++
++        return False
++
+     def get_target_uri(self, docname: str, typ: str = None) -> str:
+         return ''
+ 

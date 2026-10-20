@@ -1,0 +1,113 @@
+diff --git a/sphinx/directives/other.py b/sphinx/directives/other.py
+index 35e16e623..bbffb5383 100644
+--- a/sphinx/directives/other.py
++++ b/sphinx/directives/other.py
+@@ -1,5 +1,5 @@
+ import re
+-from typing import TYPE_CHECKING, Any, Dict, List, cast
++from typing import TYPE_CHECKING, Any, Dict, List, Set, cast
+ 
+ from docutils import nodes
+ from docutils.nodes import Element, Node
+@@ -10,6 +10,7 @@ from docutils.parsers.rst.directives.misc import Include as BaseInclude
+ 
+ from sphinx import addnodes
+ from sphinx.domains.changeset import VersionChange  # NOQA  # for compatibility
++from sphinx.environment.adapters.toctree import TOCTREE_GENERATED_DOCS
+ from sphinx.locale import _, __
+ from sphinx.util import docname_join, logging, url_re
+ from sphinx.util.docutils import SphinxDirective
+@@ -82,6 +83,7 @@ class TocTree(SphinxDirective):
+         # glob target documents
+         all_docnames = self.env.found_docs.copy()
+         all_docnames.remove(self.env.docname)  # remove current document
++        generated_docnames: Set[str] = set()
+ 
+         ret: List[Node] = []
+         excluded = Matcher(self.config.exclude_patterns)
+@@ -118,7 +120,8 @@ class TocTree(SphinxDirective):
+                 docname = docname_join(self.env.docname, docname)
+                 if url_re.match(ref) or ref == 'self':
+                     toctree['entries'].append((title, ref))
+-                elif docname not in self.env.found_docs:
++                elif (docname not in self.env.found_docs and
++                      docname not in TOCTREE_GENERATED_DOCS):
+                     if excluded(self.env.doc2path(docname, False)):
+                         message = __('toctree contains reference to excluded document %r')
+                         subtype = 'excluded'
+@@ -130,14 +133,18 @@ class TocTree(SphinxDirective):
+                                    location=toctree)
+                     self.env.note_reread()
+                 else:
++                    generated_doc = docname not in self.env.found_docs
+                     if docname in all_docnames:
+                         all_docnames.remove(docname)
++                    elif generated_doc and docname not in generated_docnames:
++                        generated_docnames.add(docname)
+                     else:
+                         logger.warning(__('duplicated entry found in toctree: %s'), docname,
+                                        location=toctree)
+ 
+                     toctree['entries'].append((title, docname))
+-                    toctree['includefiles'].append(docname)
++                    if not generated_doc:
++                        toctree['includefiles'].append(docname)
+ 
+         # entries contains all entries (self references, external links etc.)
+         if 'reversed' in self.options:
+diff --git a/sphinx/environment/adapters/toctree.py b/sphinx/environment/adapters/toctree.py
+index 9678e3c7c..b571fd84b 100644
+--- a/sphinx/environment/adapters/toctree.py
++++ b/sphinx/environment/adapters/toctree.py
+@@ -18,6 +18,8 @@ if TYPE_CHECKING:
+ 
+ logger = logging.getLogger(__name__)
+ 
++TOCTREE_GENERATED_DOCS = {'genindex', 'modindex', 'search'}
++
+ 
+ class TocTree:
+     def __init__(self, env: "BuildEnvironment") -> None:
+@@ -146,18 +148,30 @@ class TocTree:
+                                            ref, ' <- '.join(parents),
+                                            location=ref, type='toc', subtype='circular')
+                             continue
+-                        refdoc = ref
+-                        toc = self.env.tocs[ref].deepcopy()
+-                        maxdepth = self.env.metadata[ref].get('tocdepth', 0)
+-                        if ref not in toctree_ancestors or (prune and maxdepth > 0):
+-                            self._toctree_prune(toc, 2, maxdepth, collapse)
+-                        process_only_nodes(toc, builder.tags)
+-                        if title and toc.children and len(toc.children) == 1:
+-                            child = toc.children[0]
+-                            for refnode in child.findall(nodes.reference):
+-                                if refnode['refuri'] == ref and \
+-                                   not refnode['anchorname']:
+-                                    refnode.children = [nodes.Text(title)]
++                        if ref in TOCTREE_GENERATED_DOCS and ref not in self.env.tocs:
++                            # Generated pages do not have doctrees, so add them as leaf nodes.
++                            target, _anchor, label = self.env.domains['std'].labels[ref]
++                            title = title or label
++                            reference = nodes.reference('', '', internal=True,
++                                                        refuri=target, anchorname='',
++                                                        *[nodes.Text(title)])
++                            para = addnodes.compact_paragraph('', '', reference)
++                            item = nodes.list_item('', para)
++                            toc = nodes.bullet_list('', item)
++                            refdoc = target
++                        else:
++                            refdoc = ref
++                            toc = self.env.tocs[ref].deepcopy()
++                            maxdepth = self.env.metadata[ref].get('tocdepth', 0)
++                            if ref not in toctree_ancestors or (prune and maxdepth > 0):
++                                self._toctree_prune(toc, 2, maxdepth, collapse)
++                            process_only_nodes(toc, builder.tags)
++                            if title and toc.children and len(toc.children) == 1:
++                                child = toc.children[0]
++                                for refnode in child.findall(nodes.reference):
++                                    if refnode['refuri'] == ref and \
++                                       not refnode['anchorname']:
++                                        refnode.children = [nodes.Text(title)]
+                     if not toc.children:
+                         # empty toc means: no titles will show up in the toctree
+                         logger.warning(__('toctree contains reference to document %r that '

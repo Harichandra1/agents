@@ -1,0 +1,55 @@
+diff --git a/sphinx/directives/other.py b/sphinx/directives/other.py
+index 19f7c0a8d..29a5c09ba 100644
+--- a/sphinx/directives/other.py
++++ b/sphinx/directives/other.py
+@@ -3,7 +3,7 @@ from __future__ import annotations
+ import re
+ from typing import TYPE_CHECKING, Any, cast
+ 
+-from docutils import nodes
++from docutils import nodes, statemachine
+ from docutils.parsers.rst import directives
+ from docutils.parsers.rst.directives.admonitions import BaseAdmonition
+ from docutils.parsers.rst.directives.misc import Class
+@@ -372,11 +372,39 @@ class Include(BaseInclude, SphinxDirective):
+         if self.arguments[0].startswith('<') and \
+            self.arguments[0].endswith('>'):
+             # docutils "standard" includes, do not do path processing
+-            return super().run()
++            return self._run_with_source_read()
+         rel_filename, filename = self.env.relfn2path(self.arguments[0])
+         self.arguments[0] = filename
+         self.env.note_included(filename)
+-        return super().run()
++        return self._run_with_source_read()
++
++    def _run_with_source_read(self) -> list[Node]:
++        # docutils inserts included reStructuredText directly into the state
++        # machine's input.  It does not pass through Sphinx's reader, so
++        # source-read handlers would otherwise only see the including document.
++        state_machine = self.state_machine
++        insert_input = state_machine.insert_input
++
++        def insert_input_with_source_read(lines: list[str], source: str) -> None:
++            end_marker = '.. end of inclusion from "%s"' % source
++            if len(lines) >= 2 and lines[-2:] == ['', end_marker]:
++                content = lines[:-2]
++                included_source = ['\n'.join(content)]
++                self.env.events.emit('source-read', self.env.docname, included_source)
++                lines = statemachine.string2lines(
++                    included_source[0],
++                    self.options.get('tab-width',
++                                     self.state.document.settings.tab_width),
++                    convert_whitespace=True)
++                lines += ['', end_marker]
++
++            insert_input(lines, source)
++
++        state_machine.insert_input = insert_input_with_source_read
++        try:
++            return super().run()
++        finally:
++            state_machine.insert_input = insert_input
+ 
+ 
+ def setup(app: Sphinx) -> dict[str, Any]:

@@ -1,0 +1,65 @@
+diff --git a/django/db/models/base.py b/django/db/models/base.py
+index 844c01e95e..526870f30a 100644
+--- a/django/db/models/base.py
++++ b/django/db/models/base.py
+@@ -569,6 +569,17 @@ class Model(metaclass=ModelBase):
+         return getattr(self, meta.pk.attname)
+ 
+     def _set_pk_val(self, value):
++        if value is None:
++            # Clear parent links too, otherwise _save_parents() can copy stale
++            # values back onto an ancestor and update existing rows.
++            def clear_parent_keys(model):
++                for parent, parent_link in model._meta.parents.items():
++                    if parent_link:
++                        setattr(self, parent_link.attname, None)
++                        setattr(self, parent_link.target_field.attname, None)
++                        clear_parent_keys(parent)
++
++            clear_parent_keys(self._meta.concrete_model)
+         return setattr(self, self._meta.pk.attname, value)
+ 
+     pk = property(_get_pk_val, _set_pk_val)
+diff --git a/tests/model_inheritance_regress/tests.py b/tests/model_inheritance_regress/tests.py
+index b0156ff9ac..e14f7f137d 100644
+--- a/tests/model_inheritance_regress/tests.py
++++ b/tests/model_inheritance_regress/tests.py
+@@ -438,6 +438,38 @@ class ModelInheritanceTest(TestCase):
+         self.assertEqual(senator.title, 'X')
+         self.assertEqual(senator.state, 'Y')
+ 
++    def test_create_new_instance_with_pk_equals_none(self):
++        original = ItalianRestaurant.objects.create(
++            name='Original', address='1 Main St', serves_gnocchi=True,
++        )
++        duplicate = ItalianRestaurant.objects.get(pk=original.pk)
++        duplicate.pk = None
++        duplicate.name = 'Copy'
++        duplicate.save()
++
++        self.assertEqual(ItalianRestaurant.objects.count(), 2)
++        original.refresh_from_db()
++        self.assertEqual(original.name, 'Original')
++        self.assertTrue(original.serves_gnocchi)
++        self.assertEqual(duplicate.name, 'Copy')
++
++    def test_create_new_instance_with_pk_equals_none_multi_inheritance(self):
++        original = Senator.objects.create(
++            name='Original', title='Original title', state='OR',
++        )
++        duplicate = Senator.objects.get(pk=original.pk)
++        duplicate.pk = None
++        duplicate.name = 'Copy'
++        duplicate.title = 'Copy title'
++        duplicate.save()
++
++        self.assertEqual(Senator.objects.count(), 2)
++        original.refresh_from_db()
++        self.assertEqual(original.name, 'Original')
++        self.assertEqual(original.title, 'Original title')
++        self.assertEqual(duplicate.name, 'Copy')
++        self.assertEqual(duplicate.title, 'Copy title')
++
+     def test_inheritance_resolve_columns(self):
+         Restaurant.objects.create(name='Bobs Cafe', address="Somewhere",
+                                   serves_pizza=True, serves_hot_dogs=True)

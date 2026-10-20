@@ -1,0 +1,92 @@
+diff --git a/doc/usage/builders/index.rst b/doc/usage/builders/index.rst
+index db6706944..71f5244c5 100644
+--- a/doc/usage/builders/index.rst
++++ b/doc/usage/builders/index.rst
+@@ -429,8 +429,11 @@ name is ``rinoh``. Refer to the `rinohtype manual`_ for details.
+ .. class:: CheckExternalLinksBuilder
+ 
+    This builder scans all documents for external links, tries to open them with
+-   ``requests``, and writes an overview which ones are broken and redirected to
+-   standard output and to :file:`output.txt` in the output directory.
++   ``requests``, and checks relative local links against the source directory.
++   It writes an overview of broken and redirected links to standard output and
++   to :file:`output.txt` in the output directory. Relative links whose targets
++   lie outside the source directory and links with absolute paths cannot be
++   checked because their location depends on the deployed site.
+ 
+    .. autoattribute:: name
+ 
+diff --git a/sphinx/builders/linkcheck.py b/sphinx/builders/linkcheck.py
+index dd5317087..45b232e92 100644
+--- a/sphinx/builders/linkcheck.py
++++ b/sphinx/builders/linkcheck.py
+@@ -208,12 +208,37 @@ class CheckExternalLinksBuilder(Builder):
+                 else:
+                     return 'redirected', new_url, 0
+ 
+-        def check() -> Tuple[str, str, int]:
++        def check_local_uri(uri: str, docname: str) -> bool:
++            """Return False only when a resolvable local path is missing."""
++            try:
++                parsed = urlparse(uri)
++            except ValueError:
++                # Keep malformed URIs in the old informational local category
++                # rather than letting a worker fail while parsing them.
++                return True
++            local_path = parsed.path
++            # Absolute paths are relative to the root of a deployed site, which
++            # is not known to the linkcheck builder. Other URL schemes cannot
++            # be resolved against the source directory either.
++            if parsed.scheme or not local_path or path.isabs(local_path):
++                return True
++
++            local_path = unquote(local_path)
++            doc_path = self.env.doc2path(docname, None)
++            target = path.abspath(path.join(self.srcdir, path.dirname(doc_path),
++                                            local_path))
++            srcdir = path.abspath(self.srcdir)
++            try:
++                if path.commonpath([srcdir, target]) != srcdir:
++                    return True
++            except ValueError:
++                return True
++            return path.exists(target)
++
++        def check(docname: str) -> Tuple[str, str, int]:
+             # check for various conditions without bothering the network
+             if len(uri) == 0 or uri.startswith(('#', 'mailto:', 'ftp:')):
+                 return 'unchecked', '', 0
+-            elif not uri.startswith(('http:', 'https:')):
+-                return 'local', '', 0
+             elif uri in self.good:
+                 return 'working', 'old', 0
+             elif uri in self.broken:
+@@ -223,6 +248,11 @@ class CheckExternalLinksBuilder(Builder):
+             for rex in self.to_ignore:
+                 if rex.match(uri):
+                     return 'ignored', '', 0
++            if not uri.startswith(('http:', 'https:')):
++                if check_local_uri(uri, docname):
++                    return 'local', '', 0
++                else:
++                    return 'broken', __('Local file not found'), 0
+ 
+             # need to actually check the URI
+             for _ in range(self.app.config.linkcheck_retries):
+@@ -243,7 +273,7 @@ class CheckExternalLinksBuilder(Builder):
+             uri, docname, lineno = self.wqueue.get()
+             if uri is None:
+                 break
+-            status, info, code = check()
++            status, info, code = check(docname)
+             self.rqueue.put((uri, docname, lineno, status, info, code))
+ 
+     def process_result(self, result: Tuple[str, str, int, str, str, int]) -> None:
+@@ -275,6 +305,7 @@ class CheckExternalLinksBuilder(Builder):
+             logger.info(darkgreen('ok        ') + uri + info)
+             self.write_linkstat(linkstat)
+         elif status == 'broken':
++            self.app.statuscode = 1
+             if self.app.quiet or self.app.warningiserror:
+                 logger.warning(__('broken link: %s (%s)'), uri, info,
+                                location=(filename, lineno))

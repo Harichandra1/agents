@@ -1,0 +1,40 @@
+diff --git a/django/db/models/fields/__init__.py b/django/db/models/fields/__init__.py
+index ee45bb941e..952f8d31b5 100644
+--- a/django/db/models/fields/__init__.py
++++ b/django/db/models/fields/__init__.py
+@@ -763,8 +763,10 @@ class Field(RegisterLookupMixin):
+             if not getattr(cls, self.attname, None):
+                 setattr(cls, self.attname, self.descriptor_class(self))
+         if self.choices is not None:
+-            setattr(cls, 'get_%s_display' % self.name,
+-                    partialmethod(cls._get_FIELD_display, field=self))
++            get_display = 'get_%s_display' % self.name
++            if not hasattr(cls, get_display):
++                setattr(cls, get_display,
++                        partialmethod(cls._get_FIELD_display, field=self))
+ 
+     def get_filter_kwargs_for_object(self, obj):
+         """
+diff --git a/tests/model_fields/tests.py b/tests/model_fields/tests.py
+index 0d6e930b06..90ad810ff2 100644
+--- a/tests/model_fields/tests.py
++++ b/tests/model_fields/tests.py
+@@ -168,6 +168,18 @@ class GetFieldDisplayTests(SimpleTestCase):
+         self.assertIsInstance(val, str)
+         self.assertEqual(val, 'translated')
+ 
++    def test_overriding_FIELD_display(self):
++        class ModelWithOverride(models.Model):
++            field = models.CharField(max_length=10, choices=[('a', 'A')])
++
++            def get_field_display(self):
++                return 'something'
++
++            class Meta:
++                app_label = 'model_fields'
++
++        self.assertEqual(ModelWithOverride().get_field_display(), 'something')
++
+     def test_iterator_choices(self):
+         """
+         get_choices() works with Iterators.

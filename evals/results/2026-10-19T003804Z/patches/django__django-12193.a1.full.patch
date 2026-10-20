@@ -1,0 +1,37 @@
+diff --git a/django/forms/widgets.py b/django/forms/widgets.py
+index 6fe220bea7..352f2e044b 100644
+--- a/django/forms/widgets.py
++++ b/django/forms/widgets.py
+@@ -522,8 +522,7 @@ class CheckboxInput(Input):
+ 
+     def get_context(self, name, value, attrs):
+         if self.check_test(value):
+-            if attrs is None:
+-                attrs = {}
++            attrs = {} if attrs is None else {**attrs}
+             attrs['checked'] = True
+         return super().get_context(name, value, attrs)
+ 
+diff --git a/tests/forms_tests/widget_tests/test_checkboxinput.py b/tests/forms_tests/widget_tests/test_checkboxinput.py
+index 6483b7f211..0896722aa7 100644
+--- a/tests/forms_tests/widget_tests/test_checkboxinput.py
++++ b/tests/forms_tests/widget_tests/test_checkboxinput.py
+@@ -44,6 +44,18 @@ class CheckboxInputTest(WidgetTest):
+             html='<input checked type="checkbox" name="is_cool" value="1">',
+         )
+ 
++    def test_get_context_does_not_mutate_attrs(self):
++        attrs = {'class': 'checkbox'}
++        checked_context = self.widget.get_context('is_cool', True, attrs)
++        unchecked_context = self.widget.get_context('is_cool', False, attrs)
++
++        self.assertEqual(attrs, {'class': 'checkbox'})
++        self.assertEqual(checked_context['widget']['attrs'], {
++            'class': 'checkbox',
++            'checked': True,
++        })
++        self.assertEqual(unchecked_context['widget']['attrs'], {'class': 'checkbox'})
++
+     def test_render_check_test(self):
+         """
+         You can pass 'check_test' to the constructor. This is a callable that

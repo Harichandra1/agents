@@ -1,0 +1,127 @@
+diff --git a/doc/extdev/appapi.rst b/doc/extdev/appapi.rst
+index 78e88b063..b42eb0ae3 100644
+--- a/doc/extdev/appapi.rst
++++ b/doc/extdev/appapi.rst
+@@ -250,9 +250,13 @@ Here is a more detailed list of these events.
+ 
+ .. event:: source-read (app, docname, source)
+ 
+-   Emitted when a source file has been read.  The *source* argument is a list
+-   whose single element is the contents of the source file.  You can process the
+-   contents and replace this item to implement source-level transformations.
++   Emitted when a source file has been read, and for reStructuredText inserted
++   by the ``include`` directive.  The *source* argument is a list whose single
++   element is the contents of the source file.  You can process the contents
++   and replace this item to implement source-level transformations.  For
++   included files, *docname* is the included file's document name when
++   available, or its path
++   otherwise.
+ 
+    For example, if you want to use ``$`` signs to delimit inline math, like in
+    LaTeX, you can use a regular expression to replace ``$...$`` by
+diff --git a/sphinx/directives/other.py b/sphinx/directives/other.py
+index 19f7c0a8d..3d4cce136 100644
+--- a/sphinx/directives/other.py
++++ b/sphinx/directives/other.py
+@@ -369,6 +369,20 @@ class Include(BaseInclude, SphinxDirective):
+     """
+ 
+     def run(self) -> list[Node]:
++        state_machine = self.state_machine
++        missing = object()
++        previous_tab_width = getattr(state_machine, '_sphinx_include_tab_width', missing)
++        tab_width = self.options.get('tab-width', self.state.document.settings.tab_width)
++        setattr(state_machine, '_sphinx_include_tab_width', tab_width)
++        try:
++            return self._run_include()
++        finally:
++            if previous_tab_width is missing:
++                delattr(state_machine, '_sphinx_include_tab_width')
++            else:
++                setattr(state_machine, '_sphinx_include_tab_width', previous_tab_width)
++
++    def _run_include(self) -> list[Node]:
+         if self.arguments[0].startswith('<') and \
+            self.arguments[0].endswith('>'):
+             # docutils "standard" includes, do not do path processing
+diff --git a/sphinx/parsers.py b/sphinx/parsers.py
+index 1269884ab..612e58924 100644
+--- a/sphinx/parsers.py
++++ b/sphinx/parsers.py
+@@ -8,7 +8,7 @@ import docutils.parsers
+ import docutils.parsers.rst
+ from docutils import nodes
+ from docutils.parsers.rst import states
+-from docutils.statemachine import StringList
++from docutils.statemachine import StringList, string2lines
+ from docutils.transforms.universal import SmartQuotes
+ 
+ from sphinx.util.rst import append_epilog, prepend_prolog
+@@ -46,6 +46,58 @@ class Parser(docutils.parsers.Parser):
+         self.env = app.env
+ 
+ 
++class _SphinxStateMachineMixin:
++    """Emit ``source-read`` when the include directive inserts a file."""
++
++    document: nodes.document
++
++    def _process_inserted_input(self, input_lines: list[str], source: str) -> list[str]:
++        # The docutils include directive appends this marker to the included
++        # input. Keep it out of the source-read event, and restore it after
++        # processing the included source.
++        end_of_inclusion = '.. end of inclusion from "%s"' % source
++        if len(input_lines) >= 2 and input_lines[-2:] == ['', end_of_inclusion]:
++            source_text = '\n'.join(input_lines[:-2])
++            arg = [source_text]
++            env = self.document.settings.env
++            docname = env.path2doc(source) or source
++            env.events.emit('source-read', docname, arg)
++
++            if isinstance(arg[0], str) and arg[0] != source_text:
++                tab_width = getattr(
++                    self, '_sphinx_include_tab_width', self.document.settings.tab_width)
++                input_lines = string2lines(
++                    arg[0], tab_width=tab_width, convert_whitespace=True)
++                input_lines += ['', end_of_inclusion]
++
++        return input_lines
++
++
++def _use_sphinx_nested_state_machine(state_machine: Any) -> None:
++    for state in state_machine.states.values():
++        state.nested_sm = SphinxNestedStateMachine
++
++
++class SphinxNestedStateMachine(_SphinxStateMachineMixin, states.NestedStateMachine):
++    def __init__(self, *args: Any, **kwargs: Any) -> None:
++        super().__init__(*args, **kwargs)
++        _use_sphinx_nested_state_machine(self)
++
++    def insert_input(self, input_lines: list[str], source: str) -> None:
++        input_lines = self._process_inserted_input(input_lines, source)
++        super().insert_input(input_lines, source)
++
++
++class SphinxRSTStateMachine(_SphinxStateMachineMixin, states.RSTStateMachine):
++    def __init__(self, *args: Any, **kwargs: Any) -> None:
++        super().__init__(*args, **kwargs)
++        _use_sphinx_nested_state_machine(self)
++
++    def insert_input(self, input_lines: list[str], source: str) -> None:
++        input_lines = self._process_inserted_input(input_lines, source)
++        super().insert_input(input_lines, source)
++
++
+ class RSTParser(docutils.parsers.rst.Parser, Parser):
+     """A reST parser for Sphinx."""
+ 
+@@ -62,7 +114,7 @@ class RSTParser(docutils.parsers.rst.Parser, Parser):
+     def parse(self, inputstring: str | StringList, document: nodes.document) -> None:
+         """Parse text and generate a document tree."""
+         self.setup_parse(inputstring, document)  # type: ignore[arg-type]
+-        self.statemachine = states.RSTStateMachine(
++        self.statemachine = SphinxRSTStateMachine(
+             state_classes=self.state_classes,
+             initial_state=self.initial_state,
+             debug=document.reporter.debug_flag)

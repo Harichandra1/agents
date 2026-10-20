@@ -1,0 +1,40 @@
+diff --git a/sphinx/domains/python.py b/sphinx/domains/python.py
+index 000e2e8d3..b27eb0bf9 100644
+--- a/sphinx/domains/python.py
++++ b/sphinx/domains/python.py
+@@ -1148,7 +1148,7 @@ class PythonDomain(Domain):
+                     fullname = modname + '.' + classname + '.' + name
+                     if fullname in self.objects and self.objects[fullname].objtype in objtypes:
+                         newname = fullname
+-                if not newname:
++                if not newname and not (type == 'obj' and classname):
+                     if modname and modname + '.' + name in self.objects and \
+                        self.objects[modname + '.' + name].objtype in objtypes:
+                         newname = modname + '.' + name
+diff --git a/tests/test_domain_py.py b/tests/test_domain_py.py
+index e0c690518..203e536ec 100644
+--- a/tests/test_domain_py.py
++++ b/tests/test_domain_py.py
+@@ -791,6 +791,22 @@ def test_canonical(app):
+     assert domain.objects['_io.StringIO'] == ('index', 'io.StringIO', 'class', True)
+ 
+ 
++def test_info_field_list_var(app):
++    text = (".. py:module:: example\n"
++            ".. py:data:: somename\n"
++            ".. py:class:: Foo\n")
++    restructuredtext.parse(app, text)
++
++    domain = app.env.get_domain('py')
++    # An implicit variable reference in a class should not resolve to an
++    # unrelated module-level variable with the same name.
++    assert domain.find_obj(app.env, 'example', 'Foo', 'somename', 'obj', 1) == []
++
++    # Explicit references retain the regular lookup behavior.
++    matches = domain.find_obj(app.env, 'example', 'Foo', 'somename', 'obj', 0)
++    assert matches[0][0] == 'somename'
++
++
+ def test_info_field_list(app):
+     text = (".. py:module:: example\n"
+             ".. py:class:: Class\n"

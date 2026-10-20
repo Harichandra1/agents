@@ -1,0 +1,39 @@
+diff --git a/sphinx/util/docfields.py b/sphinx/util/docfields.py
+index c07bc7f66..1bf025b07 100644
+--- a/sphinx/util/docfields.py
++++ b/sphinx/util/docfields.py
+@@ -40,6 +40,23 @@ def _is_single_paragraph(node: nodes.field_body) -> bool:
+     return False
+ 
+ 
++def _is_grouped_parameter(fieldarg: str) -> bool:
++    """Check whether *fieldarg* is a comma-separated list of parameter names."""
++    if not isinstance(fieldarg, str):
++        return False
++
++    def is_parameter_name(name: str) -> bool:
++        name = name.strip().replace(r'\*', '*')
++        if name.startswith('**'):
++            name = name[2:]
++        elif name.startswith('*'):
++            name = name[1:]
++        return name.isidentifier()
++
++    names = fieldarg.split(',')
++    return len(names) > 1 and all(is_parameter_name(name) for name in names)
++
++
+ class Field:
+     """A doc field that is never grouped.  It can have an argument or not, the
+     argument can be linked using a specified *rolename*.  Field should be used
+@@ -319,7 +336,9 @@ class DocFieldTransformer:
+                 continue
+ 
+             # also support syntax like ``:param type name:``
+-            if typedesc.is_typed:
++            if (typedesc.is_typed and
++                    not (self.directive.domain == 'py' and typename == 'parameter' and
++                         _is_grouped_parameter(fieldarg))):
+                 try:
+                     argtype, argname = fieldarg.split(None, 1)
+                 except ValueError:

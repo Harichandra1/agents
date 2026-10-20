@@ -1,0 +1,139 @@
+diff --git a/sphinx/domains/cpp.py b/sphinx/domains/cpp.py
+index fe52d881d..b4df35d4e 100644
+--- a/sphinx/domains/cpp.py
++++ b/sphinx/domains/cpp.py
+@@ -299,6 +299,7 @@ T = TypeVar('T')
+ _string_re = re.compile(r"[LuU8]?('([^'\\]*(?:\\.[^'\\]*)*)'"
+                         r'|"([^"\\]*(?:\\.[^"\\]*)*)")', re.S)
+ _visibility_re = re.compile(r'\b(public|private|protected)\b')
++_ud_suffix_re = re.compile(r'[a-zA-Z_][a-zA-Z0-9_]*')
+ _operator_re = re.compile(r'''(?x)
+         \[\s*\]
+     |   \(\s*\)
+@@ -789,6 +790,23 @@ class ASTLiteral(ASTExpression):
+     pass
+ 
+ 
++class ASTUserDefinedLiteral(ASTLiteral):
++    def __init__(self, literal: ASTLiteral, suffix: str) -> None:
++        self.literal = literal
++        self.suffix = suffix
++
++    def _stringify(self, transform: StringifyTransform) -> str:
++        return transform(self.literal) + self.suffix
++
++    def get_id(self, version: int) -> str:
++        return self.literal.get_id(version) + 'U%d%s' % (len(self.suffix), self.suffix)
++
++    def describe_signature(self, signode: TextElement, mode: str,
++                           env: "BuildEnvironment", symbol: "Symbol") -> None:
++        txt = str(self)
++        signode.append(nodes.Text(txt, txt))
++
++
+ class ASTPointerLiteral(ASTLiteral):
+     def _stringify(self, transform: StringifyTransform) -> str:
+         return 'nullptr'
+@@ -847,7 +865,17 @@ class ASTStringLiteral(ASTLiteral):
+ 
+     def get_id(self, version: int) -> str:
+         # note: the length is not really correct with escaping
+-        return "LA%d_KcE" % (len(self.data) - 2)
++        raw_start = self.data.find('R"')
++        if raw_start != -1:
++            open_paren = self.data.find('(', raw_start + 2)
++            close_paren = self.data.rfind(')')
++            if open_paren != -1 and close_paren >= open_paren:
++                length = close_paren - open_paren - 1
++                return "LA%d_KcE" % length
++        quote = self.data.find('"')
++        if quote == -1:
++            quote = 0
++        return "LA%d_KcE" % (len(self.data) - quote - 2)
+ 
+     def describe_signature(self, signode: TextElement, mode: str,
+                            env: "BuildEnvironment", symbol: "Symbol") -> None:
+@@ -4625,9 +4653,33 @@ class DefinitionParser(BaseParser):
+         return self.config.cpp_paren_attributes
+ 
+     def _parse_string(self) -> str:
++        startPos = self.pos
++        for prefix in ('u8R"', 'uR"', 'UR"', 'LR"', 'R"'):
++            if not self.definition.startswith(prefix, self.pos):
++                continue
++            delimiter_start = self.pos + len(prefix)
++            open_paren = self.definition.find('(', delimiter_start)
++            if open_paren == -1:
++                self.fail("Expected '(' in raw string literal.")
++            delimiter = self.definition[delimiter_start:open_paren]
++            if (len(delimiter) > 16 or
++                    any(ord(char) <= 32 or char in '()\\' for char in delimiter)):
++                self.fail("Invalid delimiter in raw string literal.")
++            terminator = ')' + delimiter + '"'
++            end = self.definition.find(terminator, open_paren + 1)
++            if end == -1:
++                self.fail("Unexpected end during inside raw string.")
++            self.pos = end + len(terminator)
++            return self.definition[startPos:self.pos]
++
++        if self.definition.startswith('u8"', self.pos):
++            self.pos += 2
++        elif (self.current_char in 'uUL' and
++              self.definition[self.pos + 1:self.pos + 2] == '"'):
++            self.pos += 1
+         if self.current_char != '"':
++            self.pos = startPos
+             return None
+-        startPos = self.pos
+         self.pos += 1
+         escape = False
+         while True:
+@@ -4643,6 +4695,11 @@ class DefinitionParser(BaseParser):
+             self.pos += 1
+         return self.definition[startPos:self.pos]
+ 
++    def _parse_user_defined_literal(self, literal: ASTLiteral) -> ASTLiteral:
++        if self.match(_ud_suffix_re):
++            return ASTUserDefinedLiteral(literal, self.matched_text)
++        return literal
++
+     def _parse_literal(self) -> ASTLiteral:
+         # -> integer-literal
+         #  | character-literal
+@@ -4660,29 +4717,29 @@ class DefinitionParser(BaseParser):
+             return ASTBooleanLiteral(False)
+         for regex in [float_literal_re, binary_literal_re, hex_literal_re,
+                       integer_literal_re, octal_literal_re]:
+-            pos = self.pos
+             if self.match(regex):
+-                while self.current_char in 'uUlLfF':
+-                    self.pos += 1
+-                return ASTNumberLiteral(self.definition[pos:self.pos])
++                number = self.matched_text
++                if self.match(_ud_suffix_re):
++                    number += self.matched_text
++                return ASTNumberLiteral(number)
+ 
+         string = self._parse_string()
+         if string is not None:
+-            return ASTStringLiteral(string)
++            return self._parse_user_defined_literal(ASTStringLiteral(string))
+ 
+         # character-literal
+         if self.match(char_literal_re):
+             prefix = self.last_match.group(1)  # may be None when no prefix
+             data = self.last_match.group(2)
+             try:
+-                return ASTCharLiteral(prefix, data)
++                literal = ASTCharLiteral(prefix, data)
++                return self._parse_user_defined_literal(literal)
+             except UnicodeDecodeError as e:
+                 self.fail("Can not handle character literal. Internal error was: %s" % e)
+             except UnsupportedMultiCharacterCharLiteral:
+                 self.fail("Can not handle character literal"
+                           " resulting in multiple decoded characters.")
+ 
+-        # TODO: user-defined lit
+         return None
+ 
+     def _parse_fold_or_paren_expression(self) -> ASTExpression:

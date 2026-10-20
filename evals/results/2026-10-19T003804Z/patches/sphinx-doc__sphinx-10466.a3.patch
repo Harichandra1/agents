@@ -1,0 +1,46 @@
+diff --git a/sphinx/builders/gettext.py b/sphinx/builders/gettext.py
+index e8bc547b7..cb7e906bf 100644
+--- a/sphinx/builders/gettext.py
++++ b/sphinx/builders/gettext.py
+@@ -3,7 +3,7 @@
+ from codecs import open
+ from collections import OrderedDict, defaultdict
+ from datetime import datetime, timedelta, tzinfo
+-from os import getenv, path, walk
++from os import getcwd, getenv, path, walk
+ from time import time
+ from typing import Any, DefaultDict, Dict, Generator, Iterable, List, Set, Tuple, Union
+ from uuid import uuid4
+@@ -57,7 +57,31 @@ class Catalog:
+ 
+     def __iter__(self) -> Generator[Message, None, None]:
+         for message in self.messages:
+-            positions = [(source, line) for source, line, uuid in self.metadata[message]]
++            positions = []
++            seen_positions = set()
++            try:
++                cwd = getcwd()
++            except OSError:
++                cwd = None
++
++            for source, line, uuid in self.metadata[message]:
++                if cwd is not None and isinstance(source, str) and source:
++                    source = relpath(source, start=cwd)
++                position = (source, line)
++                try:
++                    duplicate = position in seen_positions
++                except TypeError:
++                    # Keep unusual, unhashable source values compatible with the
++                    # previous behaviour of Catalog.__iter__.
++                    duplicate = position in positions
++                if duplicate:
++                    continue
++                try:
++                    seen_positions.add(position)
++                except TypeError:
++                    pass
++                positions.append(position)
++
+             uuids = [uuid for source, line, uuid in self.metadata[message]]
+             yield Message(message, positions, uuids)
+ 

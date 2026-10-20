@@ -1,0 +1,89 @@
+diff --git a/django/contrib/admin/utils.py b/django/contrib/admin/utils.py
+index e4ddc8f017..50ed3f0102 100755
+--- a/django/contrib/admin/utils.py
++++ b/django/contrib/admin/utils.py
+@@ -388,6 +388,11 @@ def display_for_field(value, field, empty_value_display):
+         return _boolean_icon(value)
+     elif value is None:
+         return empty_value_display
++    elif isinstance(field, models.JSONField):
++        try:
++            return field.formfield().prepare_value(value)
++        except (TypeError, ValueError, RecursionError):
++            return display_for_value(value, empty_value_display)
+     elif isinstance(field, models.DateTimeField):
+         return formats.localize(timezone.template_localtime(value))
+     elif isinstance(field, (models.DateField, models.TimeField)):
+diff --git a/tests/admin_utils/tests.py b/tests/admin_utils/tests.py
+index 463ba9556d..4f5a008c10 100755
+--- a/tests/admin_utils/tests.py
++++ b/tests/admin_utils/tests.py
+@@ -139,6 +139,53 @@ class UtilsTests(SimpleTestCase):
+ 
+             self.assertEqual(value, resolved_value)
+ 
++    def test_json_display_for_field(self):
++        field = models.JSONField()
++        self.assertEqual(
++            display_for_field({'foo': 'bar'}, field, self.empty_value),
++            '{"foo": "bar"}',
++        )
++        self.assertEqual(
++            display_for_field([], field, self.empty_value),
++            '[]',
++        )
++        self.assertEqual(
++            display_for_field({'nested': [1, {'value': True}]}, field, self.empty_value),
++            '{"nested": [1, {"value": true}]}',
++        )
++        self.assertEqual(
++            display_for_field('', field, self.empty_value),
++            '""',
++        )
++        self.assertEqual(
++            display_for_field(complex(1, 2), field, self.empty_value),
++            '(1+2j)',
++        )
++        circular = []
++        circular.append(circular)
++        self.assertEqual(
++            display_for_field(circular, field, self.empty_value),
++            '[[...]]',
++        )
++        self.assertEqual(
++            display_for_field(None, field, self.empty_value),
++            self.empty_value,
++        )
++
++        invalid_json = forms.JSONField().bound_data('{invalid', None)
++        self.assertEqual(
++            display_for_field(invalid_json, field, self.empty_value),
++            '{invalid',
++        )
++
++        class CustomJSONField(models.JSONField):
++            pass
++
++        self.assertEqual(
++            display_for_field({'foo': 'bar'}, CustomJSONField(), self.empty_value),
++            '{"foo": "bar"}',
++        )
++
+     def test_null_display_for_field(self):
+         """
+         Regression test for #12550: display_for_field should handle None
+@@ -272,6 +319,14 @@ class UtilsTests(SimpleTestCase):
+         )
+         self.assertEqual(label_for_field('site_id', Article), 'Site id')
+ 
++        class JSONModel(models.Model):
++            data = models.JSONField(verbose_name='JSON data')
++
++            class Meta:
++                app_label = 'admin_utils'
++
++        self.assertEqual(label_for_field('data', JSONModel), 'JSON data')
++
+         class MockModelAdmin:
+             def test_from_model(self, obj):
+                 return "nothing"

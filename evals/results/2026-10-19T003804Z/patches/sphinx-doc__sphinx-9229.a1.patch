@@ -1,0 +1,51 @@
+diff --git a/sphinx/ext/autodoc/__init__.py b/sphinx/ext/autodoc/__init__.py
+index 1f4c98284..b3892b913 100644
+--- a/sphinx/ext/autodoc/__init__.py
++++ b/sphinx/ext/autodoc/__init__.py
+@@ -1470,6 +1470,13 @@ class ClassDocumenter(DocstringSignatureMixin, ModuleLevelDocumenter):  # type:
+                 self.doc_as_attr = True
+         return ret
+ 
++    def get_real_modname(self) -> str:
++        if self.doc_as_attr:
++            # Look for attribute documentation in the module where the alias is defined.
++            return safe_getattr(self.module, '__name__', self.modname)
++        else:
++            return super().get_real_modname()
++
+     def _get_signature(self) -> Tuple[Optional[Any], Optional[str], Optional[Signature]]:
+         def get_user_defined_function_or_method(obj: Any, attr: str) -> Any:
+             """ Get the `attr` function or method from `obj`, if it is user-defined. """
+@@ -1724,10 +1731,28 @@ class ClassDocumenter(DocstringSignatureMixin, ModuleLevelDocumenter):  # type:
+     def add_content(self, more_content: Optional[StringList], no_docstring: bool = False
+                     ) -> None:
+         if self.doc_as_attr:
+-            try:
+-                more_content = StringList([_('alias of %s') % restify(self.object)], source='')
+-            except AttributeError:
+-                pass  # Invalid class object is passed.
++            key = ('.'.join(self.objpath[:-1]), self.objpath[-1])
++            attr_docs = self.analyzer.find_attr_docs() if self.analyzer else {}
++            if not self.objpath[:-1] and inspect.isclass(self.parent):
++                parent_qualname = safe_getattr(self.parent, '__qualname__', None)
++                if parent_qualname:
++                    key = (parent_qualname, self.objpath[-1])
++
++            docstring = attr_docs.get(key, [])
++            if any(line.strip() for line in docstring):
++                if key != ('.'.join(self.objpath[:-1]), self.objpath[-1]):
++                    # Nested aliases are resolved relative to their parent class.
++                    docstrings = [list(docstring)]
++                    sourcename = self.get_sourcename()
++                    for i, line in enumerate(self.process_doc(docstrings)):
++                        self.add_line(line, sourcename, i)
++                more_content = None
++            else:
++                try:
++                    more_content = StringList([_('alias of %s') % restify(self.object)],
++                                              source='')
++                except AttributeError:
++                    pass  # Invalid class object is passed.
+ 
+         super().add_content(more_content)
+ 

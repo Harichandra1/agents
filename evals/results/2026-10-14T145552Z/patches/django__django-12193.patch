@@ -1,0 +1,31 @@
+diff --git a/django/forms/widgets.py b/django/forms/widgets.py
+index 6fe220bea7..0b25787ebc 100644
+--- a/django/forms/widgets.py
++++ b/django/forms/widgets.py
+@@ -522,8 +522,7 @@ class CheckboxInput(Input):
+ 
+     def get_context(self, name, value, attrs):
+         if self.check_test(value):
+-            if attrs is None:
+-                attrs = {}
++            attrs = {} if attrs is None else attrs.copy()
+             attrs['checked'] = True
+         return super().get_context(name, value, attrs)
+ 
+diff --git a/tests/forms_tests/widget_tests/test_checkboxinput.py b/tests/forms_tests/widget_tests/test_checkboxinput.py
+index 6483b7f211..a8d185d813 100644
+--- a/tests/forms_tests/widget_tests/test_checkboxinput.py
++++ b/tests/forms_tests/widget_tests/test_checkboxinput.py
+@@ -21,6 +21,12 @@ class CheckboxInputTest(WidgetTest):
+             html='<input checked type="checkbox" name="is_cool">'
+         )
+ 
++    def test_get_context_does_not_mutate_attrs(self):
++        attrs = {'class': 'checkbox'}
++        context = self.widget.get_context('is_cool', True, attrs)
++        self.assertEqual(attrs, {'class': 'checkbox'})
++        self.assertIs(context['widget']['attrs']['checked'], True)
++
+     def test_render_value(self):
+         """
+         Using any value that's not in ('', None, False, True) will check the

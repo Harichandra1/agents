@@ -1,0 +1,45 @@
+diff --git a/django/db/models/base.py b/django/db/models/base.py
+index 8ea6c05ef9..c73d722f4d 100644
+--- a/django/db/models/base.py
++++ b/django/db/models/base.py
+@@ -204,7 +204,13 @@ class ModelBase(type):
+             for field in base._meta.local_fields:
+                 if isinstance(field, OneToOneField):
+                     related = resolve_relation(new_class, field.remote_field.model)
+-                    parent_links[make_model_tuple(related)] = field
++                    parent_key = make_model_tuple(related)
++                    if (
++                        parent_key not in parent_links or
++                        field.remote_field.parent_link and
++                        not parent_links[parent_key].remote_field.parent_link
++                    ):
++                        parent_links[parent_key] = field
+ 
+         # Track fields inherited from base models.
+         inherited_attributes = set()
+diff --git a/tests/invalid_models_tests/test_models.py b/tests/invalid_models_tests/test_models.py
+index 60b89b6f2e..2bab006594 100644
+--- a/tests/invalid_models_tests/test_models.py
++++ b/tests/invalid_models_tests/test_models.py
+@@ -1006,6 +1006,21 @@ class OtherModelTests(SimpleTestCase):
+ 
+         self.assertEqual(ShippingMethod.check(), [])
+ 
++    def test_onetoone_with_parent_model(self):
++        class Parent(models.Model):
++            pass
++
++        class Child(Parent):
++            parent_link = models.OneToOneField(
++                Parent, on_delete=models.CASCADE, parent_link=True,
++                related_name='+',
++            )
++            other = models.OneToOneField(
++                Parent, on_delete=models.CASCADE, related_name='child',
++            )
++
++        self.assertEqual(Child._meta.pk, Child._meta.get_field('parent_link'))
++
+     def test_missing_parent_link(self):
+         msg = 'Add parent_link=True to invalid_models_tests.ParkingLot.parent.'
+         with self.assertRaisesMessage(ImproperlyConfigured, msg):

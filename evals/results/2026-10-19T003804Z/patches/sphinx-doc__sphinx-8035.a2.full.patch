@@ -1,0 +1,131 @@
+diff --git a/doc/usage/extensions/autodoc.rst b/doc/usage/extensions/autodoc.rst
+index 150b62c4d..65a735e86 100644
+--- a/doc/usage/extensions/autodoc.rst
++++ b/doc/usage/extensions/autodoc.rst
+@@ -136,10 +136,17 @@ inserting them into the page source under a suitable :rst:dir:`py:module`,
+            :undoc-members:
+ 
+    * "Private" members (that is, those named like ``_private`` or ``__private``)
+-     will be included if the ``private-members`` flag option is given.
++     will be included if the ``private-members`` option is given.  The option
++     can also take arguments to specify the private members to document::
++
++        .. autoclass:: my.Class
++           :private-members: _private_member, _another_private_member
+ 
+      .. versionadded:: 1.1
+ 
++     .. versionchanged:: 3.2
++        The option can now take arguments, i.e. the private members to document.
++
+    * autodoc considers a member private if its docstring contains
+      ``:meta private:`` in its :ref:`info-field-lists`.
+      For example:
+diff --git a/sphinx/ext/autodoc/__init__.py b/sphinx/ext/autodoc/__init__.py
+index 8c3509c3b..435b2e3a2 100644
+--- a/sphinx/ext/autodoc/__init__.py
++++ b/sphinx/ext/autodoc/__init__.py
+@@ -80,6 +80,15 @@ def members_option(arg: Any) -> Union[object, List[str]]:
+     return [x.strip() for x in arg.split(',') if x.strip()]
+ 
+ 
++def private_members_option(arg: Any) -> Union[bool, List[str]]:
++    """Used to convert the :private-members: option to auto directives."""
++    if not isinstance(arg, str):
++        # Historically this was a flag option and ignored its value.
++        return True
++    members = [x.strip() for x in str.split(arg, ',') if x.strip()]
++    return members or True
++
++
+ def members_set_option(arg: Any) -> Union[object, Set[str]]:
+     """Used to convert the :members: option to auto directives."""
+     if arg is None:
+@@ -136,6 +145,20 @@ def merge_special_members_option(options: Dict) -> None:
+             options['members'] = options['special-members']
+ 
+ 
++def merge_private_members_option(options: Dict) -> None:
++    """Merge :private-members: option to :members: option."""
++    private_members = options.get('private-members')
++    if isinstance(private_members, list):
++        if options.get('members') is ALL:
++            pass
++        elif options.get('members'):
++            for member in private_members:
++                if member not in options['members']:
++                    options['members'].append(member)
++        else:
++            options['members'] = private_members
++
++
+ # Some useful event listener factories for autodoc-process-docstring.
+ 
+ def cut_lines(pre: int, post: int = 0, what: str = None) -> Callable:
+@@ -571,6 +594,16 @@ class Documenter:
+         The user can override the skipping decision by connecting to the
+         ``autodoc-skip-member`` event.
+         """
++        def is_private_member_selected(name: str) -> bool:
++            private_members = self.options.private_members
++            if private_members is ALL:
++                return True
++            elif isinstance(private_members, list):
++                return name in private_members
++            else:
++                # Preserve the old flag-option behavior for unprocessed values.
++                return bool(private_members)
++
+         def is_filtered_inherited_member(name: str) -> bool:
+             if inspect.isclass(self.object):
+                 for cls in self.object.__mro__:
+@@ -649,14 +682,14 @@ class Documenter:
+             elif (namespace, membername) in attr_docs:
+                 if want_all and isprivate:
+                     # ignore members whose name starts with _ by default
+-                    keep = self.options.private_members
++                    keep = is_private_member_selected(membername)
+                 else:
+                     # keep documented attributes
+                     keep = True
+                 isattr = True
+             elif want_all and isprivate:
+                 # ignore members whose name starts with _ by default
+-                keep = self.options.private_members and \
++                keep = is_private_member_selected(membername) and \
+                     (has_doc or self.options.undoc_members)
+             else:
+                 if self.options.members is ALL and is_filtered_inherited_member(membername):
+@@ -859,13 +892,14 @@ class ModuleDocumenter(Documenter):
+         'show-inheritance': bool_option, 'synopsis': identity,
+         'platform': identity, 'deprecated': bool_option,
+         'member-order': member_order_option, 'exclude-members': members_set_option,
+-        'private-members': bool_option, 'special-members': members_option,
++        'private-members': private_members_option, 'special-members': members_option,
+         'imported-members': bool_option, 'ignore-module-all': bool_option
+     }  # type: Dict[str, Callable]
+ 
+     def __init__(self, *args: Any) -> None:
+         super().__init__(*args)
+         merge_special_members_option(self.options)
++        merge_private_members_option(self.options)
+         self.__all__ = None
+ 
+     @classmethod
+@@ -1279,7 +1313,7 @@ class ClassDocumenter(DocstringSignatureMixin, ModuleLevelDocumenter):  # type:
+         'noindex': bool_option, 'inherited-members': inherited_members_option,
+         'show-inheritance': bool_option, 'member-order': member_order_option,
+         'exclude-members': members_set_option,
+-        'private-members': bool_option, 'special-members': members_option,
++        'private-members': private_members_option, 'special-members': members_option,
+     }  # type: Dict[str, Callable]
+ 
+     _signature_class = None  # type: Any
+@@ -1288,6 +1322,7 @@ class ClassDocumenter(DocstringSignatureMixin, ModuleLevelDocumenter):  # type:
+     def __init__(self, *args: Any) -> None:
+         super().__init__(*args)
+         merge_special_members_option(self.options)
++        merge_private_members_option(self.options)
+ 
+     @classmethod
+     def can_document_member(cls, member: Any, membername: str, isattr: bool, parent: Any

@@ -1,0 +1,34 @@
+diff --git a/sphinx/ext/autodoc/__init__.py b/sphinx/ext/autodoc/__init__.py
+index 1f4c98284..5d6827db0 100644
+--- a/sphinx/ext/autodoc/__init__.py
++++ b/sphinx/ext/autodoc/__init__.py
+@@ -1724,10 +1724,26 @@ class ClassDocumenter(DocstringSignatureMixin, ModuleLevelDocumenter):  # type:
+     def add_content(self, more_content: Optional[StringList], no_docstring: bool = False
+                     ) -> None:
+         if self.doc_as_attr:
++            # Look for a docstring-comment in the module where the alias is declared.
++            key = ('.'.join(self.objpath[:-1]), self.objpath[-1])
++            alias_analyzer = None
+             try:
+-                more_content = StringList([_('alias of %s') % restify(self.object)], source='')
+-            except AttributeError:
+-                pass  # Invalid class object is passed.
++                alias_analyzer = ModuleAnalyzer.for_module(self.modname)
++                alias_analyzer.find_attr_docs()
++            except PycodeError:
++                pass
++
++            if (alias_analyzer and key in alias_analyzer.attr_docs and
++                    any(line.strip() for line in alias_analyzer.attr_docs[key])):
++                self.analyzer = alias_analyzer
++                self.directive.record_dependencies.add(alias_analyzer.srcname)
++                more_content = None
++            else:
++                try:
++                    more_content = StringList([_('alias of %s') % restify(self.object)],
++                                              source='')
++                except AttributeError:
++                    pass  # Invalid class object is passed.
+ 
+         super().add_content(more_content)
+ 

@@ -1,0 +1,82 @@
+diff --git a/django/forms/widgets.py b/django/forms/widgets.py
+index 338d54d72f..d09e2959e5 100644
+--- a/django/forms/widgets.py
++++ b/django/forms/widgets.py
+@@ -387,6 +387,17 @@ class FileInput(Input):
+     def value_omitted_from_data(self, data, files, name):
+         return name not in files
+ 
++    def use_required_attribute(self, initial):
++        use_required_attribute = super().use_required_attribute(initial)
++        if not use_required_attribute:
++            return False
++        try:
++            return not initial
++        except Exception:
++            # Preserve the default behavior for values that can't be tested
++            # for truthiness.
++            return use_required_attribute
++
+ 
+ FILE_INPUT_CONTRADICTION = object()
+ 
+@@ -451,9 +462,6 @@ class ClearableFileInput(FileInput):
+             return False
+         return upload
+ 
+-    def use_required_attribute(self, initial):
+-        return super().use_required_attribute(initial) and not initial
+-
+     def value_omitted_from_data(self, data, files, name):
+         return (
+             super().value_omitted_from_data(data, files, name) and
+diff --git a/tests/forms_tests/tests/test_forms.py b/tests/forms_tests/tests/test_forms.py
+index 552f3b866c..da3286c649 100644
+--- a/tests/forms_tests/tests/test_forms.py
++++ b/tests/forms_tests/tests/test_forms.py
+@@ -8,7 +8,7 @@ from django.core.files.uploadedfile import SimpleUploadedFile
+ from django.core.validators import MaxValueValidator, RegexValidator
+ from django.forms import (
+     BooleanField, CharField, CheckboxSelectMultiple, ChoiceField, DateField,
+-    DateTimeField, EmailField, FileField, FloatField, Form, HiddenInput,
++    DateTimeField, EmailField, FileField, FileInput, FloatField, Form, HiddenInput,
+     ImageField, IntegerField, MultipleChoiceField, MultipleHiddenInput,
+     MultiValueField, NullBooleanField, PasswordInput, RadioSelect, Select,
+     SplitDateTimeField, SplitHiddenDateTimeWidget, Textarea, TextInput,
+@@ -2418,6 +2418,14 @@ Password: <input type="password" name="password" required>
+ <option value="false" selected>No</option>
+ </select>""")
+ 
++    def test_filefield_with_fileinput_required(self):
++        class FileForm(Form):
++            file = FileField(widget=FileInput)
++
++        initial_file = SimpleUploadedFile('name', b'content')
++        form = FileForm(initial={'file': initial_file}, auto_id=False)
++        self.assertHTMLEqual(str(form['file']), '<input type="file" name="file">')
++
+     def test_forms_with_file_fields(self):
+         # FileFields are a special case because they take their data from the request.FILES,
+         # not request.POST.
+diff --git a/tests/forms_tests/widget_tests/test_fileinput.py b/tests/forms_tests/widget_tests/test_fileinput.py
+index bbd7c7fe52..a8cd97ee64 100644
+--- a/tests/forms_tests/widget_tests/test_fileinput.py
++++ b/tests/forms_tests/widget_tests/test_fileinput.py
+@@ -15,6 +15,17 @@ class FileInputTest(WidgetTest):
+         self.check_html(self.widget, 'email', '', html='<input type="file" name="email">')
+         self.check_html(self.widget, 'email', None, html='<input type="file" name="email">')
+ 
++    def test_use_required_attribute(self):
++        self.assertIs(self.widget.use_required_attribute(None), True)
++        self.assertIs(self.widget.use_required_attribute(''), True)
++        self.assertIs(self.widget.use_required_attribute('value'), False)
++
++        class Untruthable:
++            def __bool__(self):
++                raise ValueError('not truth-testable')
++
++        self.assertIs(self.widget.use_required_attribute(Untruthable()), True)
++
+     def test_value_omitted_from_data(self):
+         self.assertIs(self.widget.value_omitted_from_data({}, {}, 'field'), True)
+         self.assertIs(self.widget.value_omitted_from_data({}, {'field': 'value'}, 'field'), False)

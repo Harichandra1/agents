@@ -1,0 +1,59 @@
+diff --git a/sphinx/domains/python.py b/sphinx/domains/python.py
+index cd02eaad5..25f0f01a9 100644
+--- a/sphinx/domains/python.py
++++ b/sphinx/domains/python.py
+@@ -789,14 +789,19 @@ class PyMethod(PyObject):
+                 clsname = '.'.join([modname, clsname])
+         except ValueError:
+             if modname:
+-                return _('%s() (in module %s)') % (name, modname)
++                if 'property' in self.options:
++                    return _('%s (in module %s)') % (name, modname)
++                else:
++                    return _('%s() (in module %s)') % (name, modname)
++            elif 'property' in self.options:
++                return name
+             else:
+                 return '%s()' % name
+ 
+-        if 'classmethod' in self.options:
++        if 'property' in self.options:
++            return _('%s (%s property)') % (methname, clsname)
++        elif 'classmethod' in self.options:
+             return _('%s() (%s class method)') % (methname, clsname)
+-        elif 'property' in self.options:
+-            return _('%s() (%s property)') % (methname, clsname)
+         elif 'staticmethod' in self.options:
+             return _('%s() (%s static method)') % (methname, clsname)
+         else:
+diff --git a/tests/test_domain_py.py b/tests/test_domain_py.py
+index 682ea76e1..3d0d94192 100644
+--- a/tests/test_domain_py.py
++++ b/tests/test_domain_py.py
+@@ -756,7 +756,7 @@ def test_pymethod_options(app):
+ 
+     # :property:
+     assert_node(doctree[1][1][8], addnodes.index,
+-                entries=[('single', 'meth5() (Class property)', 'Class.meth5', '', None)])
++                entries=[('single', 'meth5 (Class property)', 'Class.meth5', '', None)])
+     assert_node(doctree[1][1][9], ([desc_signature, ([desc_annotation, ("property", desc_sig_space)],
+                                                      [desc_name, "meth5"])],
+                                    [desc_content, ()]))
+@@ -784,6 +784,17 @@ def test_pymethod_options(app):
+     assert domain.objects['Class.meth7'] == ('index', 'Class.meth7', 'method', False)
+ 
+ 
++def test_pymethod_property_index_matches_pyproperty(app):
++    text = (".. py:method:: Foo.bar\n"
++            "   :property:\n"
++            "\n"
++            ".. py:property:: Foo.baz\n")
++    doctree = restructuredtext.parse(app, text)
++
++    assert doctree[0]['entries'] == [('single', 'bar (Foo property)', 'Foo.bar', '', None)]
++    assert doctree[2]['entries'] == [('single', 'baz (Foo property)', 'Foo.baz', '', None)]
++
++
+ def test_pyclassmethod(app):
+     text = (".. py:class:: Class\n"
+             "\n"

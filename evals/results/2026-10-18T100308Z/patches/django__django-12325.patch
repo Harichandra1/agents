@@ -1,0 +1,24 @@
+diff --git a/django/db/models/base.py b/django/db/models/base.py
+index 8ea6c05ef9..f673cded5b 100644
+--- a/django/db/models/base.py
++++ b/django/db/models/base.py
+@@ -200,11 +200,16 @@ class ModelBase(type):
+             # Skip concrete parent classes.
+             if base != new_class and not base._meta.abstract:
+                 continue
+-            # Locate OneToOneField instances.
++            # Locate OneToOneField instances. Older migration states may not
++            # serialize parent_link, so retain primary-key OneToOne fields too.
+             for field in base._meta.local_fields:
+-                if isinstance(field, OneToOneField):
++                if isinstance(field, OneToOneField) and (
++                    field.remote_field.parent_link or field.primary_key
++                ):
+                     related = resolve_relation(new_class, field.remote_field.model)
+-                    parent_links[make_model_tuple(related)] = field
++                    related_key = make_model_tuple(related)
++                    if related_key not in parent_links or field.remote_field.parent_link:
++                        parent_links[related_key] = field
+ 
+         # Track fields inherited from base models.
+         inherited_attributes = set()

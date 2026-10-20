@@ -1,0 +1,59 @@
+diff --git a/sphinx/directives/other.py b/sphinx/directives/other.py
+index 19f7c0a8d..2a3216dc9 100644
+--- a/sphinx/directives/other.py
++++ b/sphinx/directives/other.py
+@@ -1,5 +1,6 @@
+ from __future__ import annotations
+ 
++import os
+ import re
+ from typing import TYPE_CHECKING, Any, cast
+ 
+@@ -369,14 +370,40 @@ class Include(BaseInclude, SphinxDirective):
+     """
+ 
+     def run(self) -> list[Node]:
+-        if self.arguments[0].startswith('<') and \
+-           self.arguments[0].endswith('>'):
+-            # docutils "standard" includes, do not do path processing
++        # The docutils include directive inserts reST input directly into the
++        # state machine, bypassing Sphinx's normal source-read event.  Emit the
++        # event for that input before it is parsed, so handlers can modify it.
++        state_machine = self.state_machine
++        insert_input = state_machine.insert_input
++
++        def insert_included_input(include_lines: list[str], path: str) -> None:
++            end_marker = '.. end of inclusion from "%s"' % path
++            has_end_marker = include_lines[-2:] == ['', end_marker]
++            if has_end_marker:
++                include_lines = include_lines[:-2]
++
++            original_source = '\n'.join(include_lines)
++            source = [original_source]
++            docname = self.env.path2doc(os.path.abspath(path)) or path
++            self.env.events.emit('source-read', docname, source)
++            if source and isinstance(source[0], str) and source[0] != original_source:
++                include_lines = source[0].splitlines()
++            if has_end_marker:
++                include_lines.extend(['', end_marker])
++            insert_input(include_lines, path)
++
++        state_machine.insert_input = insert_included_input
++        try:
++            if self.arguments[0].startswith('<') and \
++               self.arguments[0].endswith('>'):
++                # docutils "standard" includes, do not do path processing
++                return super().run()
++            rel_filename, filename = self.env.relfn2path(self.arguments[0])
++            self.arguments[0] = filename
++            self.env.note_included(filename)
+             return super().run()
+-        rel_filename, filename = self.env.relfn2path(self.arguments[0])
+-        self.arguments[0] = filename
+-        self.env.note_included(filename)
+-        return super().run()
++        finally:
++            state_machine.insert_input = insert_input
+ 
+ 
+ def setup(app: Sphinx) -> dict[str, Any]:

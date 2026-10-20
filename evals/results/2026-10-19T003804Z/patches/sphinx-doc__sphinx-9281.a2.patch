@@ -1,0 +1,30 @@
+diff --git a/sphinx/util/inspect.py b/sphinx/util/inspect.py
+index a415a7074..26ea531b8 100644
+--- a/sphinx/util/inspect.py
++++ b/sphinx/util/inspect.py
+@@ -12,6 +12,7 @@ import builtins
+ import contextlib
+ import enum
+ import inspect
++import keyword
+ import re
+ import sys
+ import types
+@@ -432,6 +433,17 @@ def safe_getattr(obj: Any, name: str, *defargs: Any) -> Any:
+ 
+ def object_description(object: Any) -> str:
+     """A repr() implementation that returns text safe to use in reST context."""
++    try:
++        is_enum = isenumattribute(object)
++    except Exception:
++        is_enum = False
++    if is_enum:
++        try:
++            name = object.name
++            if isinstance(name, str) and name.isidentifier() and not keyword.iskeyword(name):
++                return '%s.%s' % (object.__class__.__name__, name)
++        except Exception:
++            pass  # Fall back to repr() if the Enum member cannot be inspected.
+     if isinstance(object, dict):
+         try:
+             sorted_keys = sorted(object)

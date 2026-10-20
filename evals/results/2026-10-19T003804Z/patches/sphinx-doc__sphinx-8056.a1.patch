@@ -1,0 +1,36 @@
+diff --git a/sphinx/util/docfields.py b/sphinx/util/docfields.py
+index c07bc7f66..ba83638dd 100644
+--- a/sphinx/util/docfields.py
++++ b/sphinx/util/docfields.py
+@@ -40,6 +40,20 @@ def _is_single_paragraph(node: nodes.field_body) -> bool:
+     return False
+ 
+ 
++def _is_parameter_list(fieldarg: str) -> bool:
++    """Return whether *fieldarg* contains multiple comma-separated names."""
++    names = [name.strip() for name in fieldarg.split(',')]
++    if len(names) < 2:
++        return False
++
++    for name in names:
++        name_without_stars = name.lstrip('*')
++        if (len(name) - len(name_without_stars) > 2 or
++                not name_without_stars.isidentifier()):
++            return False
++    return True
++
++
+ class Field:
+     """A doc field that is never grouped.  It can have an argument or not, the
+     argument can be linked using a specified *rolename*.  Field should be used
+@@ -319,7 +333,9 @@ class DocFieldTransformer:
+                 continue
+ 
+             # also support syntax like ``:param type name:``
+-            if typedesc.is_typed:
++            if typedesc.is_typed and not (self.directive.domain == 'py' and
++                                           typename == 'parameter' and
++                                           _is_parameter_list(fieldarg)):
+                 try:
+                     argtype, argname = fieldarg.split(None, 1)
+                 except ValueError:

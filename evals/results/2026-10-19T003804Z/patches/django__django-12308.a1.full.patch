@@ -1,0 +1,59 @@
+diff --git a/django/contrib/admin/utils.py b/django/contrib/admin/utils.py
+index e4ddc8f017..3c51daab61 100755
+--- a/django/contrib/admin/utils.py
++++ b/django/contrib/admin/utils.py
+@@ -388,6 +388,11 @@ def display_for_field(value, field, empty_value_display):
+         return _boolean_icon(value)
+     elif value is None:
+         return empty_value_display
++    elif isinstance(field, models.JSONField):
++        try:
++            return field.formfield().prepare_value(value)
++        except (TypeError, ValueError):
++            return display_for_value(value, empty_value_display)
+     elif isinstance(field, models.DateTimeField):
+         return formats.localize(timezone.template_localtime(value))
+     elif isinstance(field, (models.DateField, models.TimeField)):
+diff --git a/tests/admin_utils/tests.py b/tests/admin_utils/tests.py
+index 463ba9556d..fff2d0b80c 100755
+--- a/tests/admin_utils/tests.py
++++ b/tests/admin_utils/tests.py
+@@ -176,6 +176,38 @@ class UtilsTests(SimpleTestCase):
+         display_value = display_for_field(None, models.FloatField(), self.empty_value)
+         self.assertEqual(display_value, self.empty_value)
+ 
++    def test_json_display_for_field(self):
++        field = models.JSONField()
++        self.assertEqual(
++            display_for_field({'foo': 'bar'}, field, self.empty_value),
++            '{"foo": "bar"}',
++        )
++        invalid_json = forms.JSONField().bound_data('{invalid json', None)
++        self.assertEqual(
++            display_for_field(invalid_json, field, self.empty_value),
++            '{invalid json',
++        )
++
++        class CustomJSONField(models.JSONField):
++            pass
++
++        self.assertEqual(
++            display_for_field({'foo': 'bar'}, CustomJSONField(), self.empty_value),
++            '{"foo": "bar"}',
++        )
++
++        unserializable = {1, 2}
++        self.assertEqual(
++            display_for_field(unserializable, field, self.empty_value),
++            display_for_value(unserializable, self.empty_value),
++        )
++        circular = []
++        circular.append(circular)
++        self.assertEqual(
++            display_for_field(circular, field, self.empty_value),
++            display_for_value(circular, self.empty_value),
++        )
++
+     def test_number_formats_display_for_field(self):
+         display_value = display_for_field(12345.6789, models.FloatField(), self.empty_value)
+         self.assertEqual(display_value, '12345.6789')

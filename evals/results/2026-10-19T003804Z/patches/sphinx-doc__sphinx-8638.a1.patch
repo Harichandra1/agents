@@ -1,0 +1,25 @@
+diff --git a/sphinx/domains/python.py b/sphinx/domains/python.py
+index 000e2e8d3..b4765e95d 100644
+--- a/sphinx/domains/python.py
++++ b/sphinx/domains/python.py
+@@ -270,6 +270,9 @@ class PyXrefMixin:
+                   contnode: Node = None, env: BuildEnvironment = None) -> Node:
+         result = super().make_xref(rolename, domain, target,  # type: ignore
+                                    innernode, contnode, env)
++        if not rolename:
++            return result
++
+         result['refspecific'] = True
+         result['py:module'] = env.ref_context.get('py:module')
+         result['py:class'] = env.ref_context.get('py:class')
+@@ -354,7 +357,9 @@ class PyObject(ObjectDescription):
+                             'keyword', 'kwarg', 'kwparam'),
+                      typerolename='class', typenames=('paramtype', 'type'),
+                      can_collapse=True),
+-        PyTypedField('variable', label=_('Variables'), rolename='obj',
++        # Variable names in info fields should not be automatically linked:
++        # matching names may refer to unrelated objects.
++        PyTypedField('variable', label=_('Variables'),
+                      names=('var', 'ivar', 'cvar'),
+                      typerolename='class', typenames=('vartype',),
+                      can_collapse=True),

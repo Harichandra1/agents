@@ -1,0 +1,49 @@
+diff --git a/sphinx/ext/autodoc/__init__.py b/sphinx/ext/autodoc/__init__.py
+index ddfd2b365..aac7f7c1f 100644
+--- a/sphinx/ext/autodoc/__init__.py
++++ b/sphinx/ext/autodoc/__init__.py
+@@ -746,7 +746,9 @@ class Documenter:
+                         keep = has_doc or self.options.undoc_members
+                 else:
+                     keep = False
+-            elif (namespace, membername) in attr_docs:
++            elif ((namespace, membername) in attr_docs or
++                  any((cls.__qualname__, membername) in attr_docs
++                      for cls in inspect.getmro(self.object)[1:])):
+                 if want_all and isprivate:
+                     if self.options.private_members is None:
+                         keep = False
+diff --git a/tests/roots/test-ext-autodoc/target/inherited_instance_variable.py b/tests/roots/test-ext-autodoc/target/inherited_instance_variable.py
+new file mode 100644
+index 000000000..efec965d5
+--- /dev/null
++++ b/tests/roots/test-ext-autodoc/target/inherited_instance_variable.py
+@@ -0,0 +1,7 @@
++class Base:
++    #: Documentation for the inherited instance variable.
++    value: int
++
++
++class Derived(Base):
++    pass
+diff --git a/tests/test_ext_autodoc_autoclass.py b/tests/test_ext_autodoc_autoclass.py
+index c36305de3..7682a8a8e 100644
+--- a/tests/test_ext_autodoc_autoclass.py
++++ b/tests/test_ext_autodoc_autoclass.py
+@@ -103,6 +103,16 @@ def test_slots_attribute(app):
+     ]
+ 
+ 
++@pytest.mark.sphinx('html', testroot='ext-autodoc')
++def test_inherited_instance_variable(app):
++    options = {"members": None,
++               "inherited-members": None}
++    actual = do_autodoc(app, 'class', 'target.inherited_instance_variable.Derived', options)
++
++    assert '   .. py:attribute:: Derived.value' in actual
++    assert '      Documentation for the inherited instance variable.' in actual
++
++
+ @pytest.mark.skipif(sys.version_info < (3, 7), reason='python 3.7+ is required.')
+ @pytest.mark.sphinx('html', testroot='ext-autodoc')
+ def test_show_inheritance_for_subclass_of_generic_type(app):

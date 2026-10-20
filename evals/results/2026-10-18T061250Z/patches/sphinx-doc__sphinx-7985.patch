@@ -1,0 +1,56 @@
+diff --git a/sphinx/builders/linkcheck.py b/sphinx/builders/linkcheck.py
+index dd5317087..98bfb29f1 100644
+--- a/sphinx/builders/linkcheck.py
++++ b/sphinx/builders/linkcheck.py
+@@ -109,6 +109,39 @@ class CheckExternalLinksBuilder(Builder):
+             thread.start()
+             self.workers.append(thread)
+ 
++    def local_target_exists(self, uri: str, docname: str) -> bool:
++        """Return whether a local link points to a source or generated file."""
++        parsed = urlparse(uri)
++        if parsed.scheme and parsed.scheme != 'file':
++            return True
++        if parsed.scheme == 'file':
++            return path.exists(unquote(parsed.path))
++
++        target = unquote(parsed.path)
++        source_dir = path.dirname(self.env.doc2path(docname, None))
++        if target.startswith('/'):
++            target = target.lstrip('/')
++            target_docname = target
++            candidates = [path.join(self.srcdir, target)]
++        else:
++            target_docname = path.normpath(path.join(source_dir, target))
++            candidates = [path.join(self.srcdir, source_dir, target)]
++
++        if any(path.exists(candidate) for candidate in candidates):
++            return True
++
++        # A link to a generated document (for example, ``otherpage.html``)
++        # has no corresponding file while the linkcheck builder is running.
++        # Check it against the documents in the environment instead.
++        if target_docname in self.env.found_docs:
++            return True
++        html_suffix = self.config.html_file_suffix
++        if html_suffix and target_docname.endswith(html_suffix):
++            target_docname = target_docname[:-len(html_suffix)]
++            if target_docname in self.env.found_docs:
++                return True
++        return False
++
+     def check_thread(self) -> None:
+         kwargs = {
+             'allow_redirects': True,
+@@ -213,7 +246,10 @@ class CheckExternalLinksBuilder(Builder):
+             if len(uri) == 0 or uri.startswith(('#', 'mailto:', 'ftp:')):
+                 return 'unchecked', '', 0
+             elif not uri.startswith(('http:', 'https:')):
+-                return 'local', '', 0
++                if self.local_target_exists(uri, docname):
++                    return 'local', '', 0
++                else:
++                    return 'broken', __('Local file not found') + ': ' + uri, 0
+             elif uri in self.good:
+                 return 'working', 'old', 0
+             elif uri in self.broken:

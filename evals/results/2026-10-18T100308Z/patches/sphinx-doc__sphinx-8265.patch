@@ -1,0 +1,47 @@
+diff --git a/sphinx/pycode/ast.py b/sphinx/pycode/ast.py
+index 9bafff11c..75154c2c9 100644
+--- a/sphinx/pycode/ast.py
++++ b/sphinx/pycode/ast.py
+@@ -151,6 +151,8 @@ class _UnparseVisitor(ast.NodeVisitor):
+         return "{" + ", ".join(items) + "}"
+ 
+     def visit_Index(self, node: ast.Index) -> str:
++        if isinstance(node.value, ast.Tuple):
++            return self._visit_tuple_subscript(node.value)
+         return self.visit(node.value)
+ 
+     def visit_Lambda(self, node: ast.Lambda) -> str:
+@@ -166,16 +168,29 @@ class _UnparseVisitor(ast.NodeVisitor):
+         return "{" + ", ".join(self.visit(e) for e in node.elts) + "}"
+ 
+     def visit_Subscript(self, node: ast.Subscript) -> str:
+-        return "%s[%s]" % (self.visit(node.value), self.visit(node.slice))
++        if isinstance(node.slice, ast.Tuple):
++            subscript = self._visit_tuple_subscript(node.slice)
++        else:
++            subscript = self.visit(node.slice)
++        return "%s[%s]" % (self.visit(node.value), subscript)
+ 
+     def visit_UnaryOp(self, node: ast.UnaryOp) -> str:
+         return "%s %s" % (self.visit(node.op), self.visit(node.operand))
+ 
+-    def visit_Tuple(self, node: ast.Tuple) -> str:
++    def _visit_tuple_contents(self, node: ast.Tuple) -> str:
++        elements = node.elts or []
++        result = ", ".join(self.visit(e) for e in elements)
++        if len(elements) == 1:
++            result += ","
++        return result
++
++    def _visit_tuple_subscript(self, node: ast.Tuple) -> str:
+         if node.elts:
+             return ", ".join(self.visit(e) for e in node.elts)
+-        else:
+-            return "()"
++        return "()"
++
++    def visit_Tuple(self, node: ast.Tuple) -> str:
++        return "(" + self._visit_tuple_contents(node) + ")"
+ 
+     if sys.version_info >= (3, 6):
+         def visit_Constant(self, node: ast.Constant) -> str:

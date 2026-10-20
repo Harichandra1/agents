@@ -1,0 +1,31 @@
+diff --git a/sphinx/domains/cpp.py b/sphinx/domains/cpp.py
+index fe52d881d..c4428a26d 100644
+--- a/sphinx/domains/cpp.py
++++ b/sphinx/domains/cpp.py
+@@ -4664,6 +4664,9 @@ class DefinitionParser(BaseParser):
+             if self.match(regex):
+                 while self.current_char in 'uUlLfF':
+                     self.pos += 1
++                # A numeric user-defined literal has an identifier suffix,
++                # in addition to any standard numeric suffix.
++                self.match(identifier_re)
+                 return ASTNumberLiteral(self.definition[pos:self.pos])
+ 
+         string = self._parse_string()
+diff --git a/tests/test_domain_cpp.py b/tests/test_domain_cpp.py
+index 9db741ae5..57994ade2 100644
+--- a/tests/test_domain_cpp.py
++++ b/tests/test_domain_cpp.py
+@@ -176,7 +176,11 @@ def test_expressions():
+         exprCheck(p + "'\\U0001f34c'", t + "127820")
+         exprCheck(p + "'\\U0001F34C'", t + "127820")
+ 
+-    # TODO: user-defined lit
++    # user-defined numeric literals
++    exprCheck('1q_s', 'L1q_sE')
++    exprCheck('6.62607015e-34q_J', 'L6.62607015e-34q_JE')
++    exprCheck('6.62607015e-34q_J * 1q_s',
++              'mlL6.62607015e-34q_JEL1q_sE')
+     exprCheck('(... + Ns)', '(... + Ns)', id4='flpl2Ns')
+     exprCheck('(Ns + ...)', '(Ns + ...)', id4='frpl2Ns')
+     exprCheck('(Ns + ... + 0)', '(Ns + ... + 0)', id4='fLpl2NsL0E')

@@ -1,0 +1,68 @@
+diff --git a/sphinx/directives/other.py b/sphinx/directives/other.py
+index 19f7c0a8d..6204865cd 100644
+--- a/sphinx/directives/other.py
++++ b/sphinx/directives/other.py
+@@ -8,6 +8,7 @@ from docutils.parsers.rst import directives
+ from docutils.parsers.rst.directives.admonitions import BaseAdmonition
+ from docutils.parsers.rst.directives.misc import Class
+ from docutils.parsers.rst.directives.misc import Include as BaseInclude
++from docutils.statemachine import string2lines
+ 
+ from sphinx import addnodes
+ from sphinx.domains.changeset import VersionChange  # noqa: F401  # for compatibility
+@@ -372,11 +373,53 @@ class Include(BaseInclude, SphinxDirective):
+         if self.arguments[0].startswith('<') and \
+            self.arguments[0].endswith('>'):
+             # docutils "standard" includes, do not do path processing
+-            return super().run()
++            return self._run_include()
+         rel_filename, filename = self.env.relfn2path(self.arguments[0])
+         self.arguments[0] = filename
+         self.env.note_included(filename)
+-        return super().run()
++        return self._run_include()
++
++    def _run_include(self) -> list[Node]:
++        state_machine = self.state_machine
++        had_insert_input = 'insert_input' in state_machine.__dict__
++        original_insert_input = state_machine.insert_input
++        previous_insert_input = state_machine.__dict__.get('insert_input')
++
++        def insert_input(include_lines: list[str], source: str) -> None:
++            # The docutils include directive appends this marker to the lines
++            # passed to insert_input().  It is not part of the included source.
++            marker = f'.. end of inclusion from "{source}"'
++            if include_lines and include_lines[-1] == marker:
++                suffix_length = (2 if len(include_lines) > 1 and
++                                 include_lines[-2] == '' else 1)
++                suffix = include_lines[-suffix_length:]
++                content_lines = include_lines[:-suffix_length]
++                source_text = '\n'.join(content_lines)
++                if content_lines:
++                    source_text += '\n'
++
++                arg = [source_text]
++                docname = self.env.path2doc(source) or source
++                self.env.events.emit('source-read', docname, arg)
++
++                if len(arg) == 1 and isinstance(arg[0], str) and arg[0] != source_text:
++                    tab_width = self.options.get(
++                        'tab-width', self.state.document.settings.tab_width)
++                    content_lines = string2lines(
++                        arg[0], tab_width=tab_width, convert_whitespace=True,
++                    )
++                    include_lines = content_lines + suffix
++
++            original_insert_input(include_lines, source)
++
++        state_machine.insert_input = insert_input
++        try:
++            return super().run()
++        finally:
++            if had_insert_input:
++                state_machine.insert_input = previous_insert_input
++            else:
++                del state_machine.insert_input
+ 
+ 
+ def setup(app: Sphinx) -> dict[str, Any]:

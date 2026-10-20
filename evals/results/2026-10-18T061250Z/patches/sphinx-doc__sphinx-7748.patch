@@ -1,0 +1,60 @@
+diff --git a/sphinx/ext/autodoc/__init__.py b/sphinx/ext/autodoc/__init__.py
+index f8e4be999..e08c59694 100644
+--- a/sphinx/ext/autodoc/__init__.py
++++ b/sphinx/ext/autodoc/__init__.py
+@@ -1045,6 +1045,7 @@ class DocstringSignatureMixin:
+         docstrings = self.get_doc()
+         self._new_docstrings = docstrings[:]
+         result = None
++        self._docstring_signatures = []
+         for i, doclines in enumerate(docstrings):
+             # no lines in docstring, no match
+             if not doclines:
+@@ -1062,11 +1063,24 @@ class DocstringSignatureMixin:
+                     valid_names.extend(cls.__name__ for cls in self.object.__mro__)
+             if base not in valid_names:
+                 continue
++            signatures = [(args, retann)]
++            signature_lines = 1
++            for line in doclines[1:]:
++                match = py_ext_sig_re.match(line)
++                if not match:
++                    break
++                _exmod, _path, base, args, retann = match.groups()
++                if base not in valid_names:
++                    break
++                signatures.append((args, retann))
++                signature_lines += 1
++
+             # re-prepare docstring to ignore more leading indentation
+             tab_width = self.directive.state.document.settings.tab_width  # type: ignore
+-            self._new_docstrings[i] = prepare_docstring('\n'.join(doclines[1:]),
++            self._new_docstrings[i] = prepare_docstring('\n'.join(doclines[signature_lines:]),
+                                                         tabsize=tab_width)
+-            result = args, retann
++            self._docstring_signatures = signatures
++            result = signatures[0]
+             # don't look any further
+             break
+         return result
+@@ -1088,6 +1102,20 @@ class DocstringSignatureMixin:
+             result = self._find_signature()
+             if result is not None:
+                 self.args, self.retann = result
++                if len(self._docstring_signatures) > 1:
++                    signatures = [super().format_signature(**kwargs)]  # type: ignore
++                    for args, retann in self._docstring_signatures[1:]:
++                        args = '(%s)' % args
++                        processed = self.env.events.emit_firstresult(
++                            'autodoc-process-signature', self.objtype, self.fullname,
++                            self.object, self.options, args, retann)
++                        if processed:
++                            args, retann = processed
++                        if args is not None:
++                            signatures.append(args + ((' -> %s' % retann) if retann else ''))
++                        else:
++                            signatures.append('')
++                    return '\n'.join(signatures)
+         return super().format_signature(**kwargs)  # type: ignore
+ 
+ 

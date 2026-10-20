@@ -1,0 +1,113 @@
+diff --git a/sphinx/ext/autodoc/__init__.py b/sphinx/ext/autodoc/__init__.py
+index 1f4c98284..5d6827db0 100644
+--- a/sphinx/ext/autodoc/__init__.py
++++ b/sphinx/ext/autodoc/__init__.py
+@@ -1724,10 +1724,26 @@ class ClassDocumenter(DocstringSignatureMixin, ModuleLevelDocumenter):  # type:
+     def add_content(self, more_content: Optional[StringList], no_docstring: bool = False
+                     ) -> None:
+         if self.doc_as_attr:
++            # Look for a docstring-comment in the module where the alias is declared.
++            key = ('.'.join(self.objpath[:-1]), self.objpath[-1])
++            alias_analyzer = None
+             try:
+-                more_content = StringList([_('alias of %s') % restify(self.object)], source='')
+-            except AttributeError:
+-                pass  # Invalid class object is passed.
++                alias_analyzer = ModuleAnalyzer.for_module(self.modname)
++                alias_analyzer.find_attr_docs()
++            except PycodeError:
++                pass
++
++            if (alias_analyzer and key in alias_analyzer.attr_docs and
++                    any(line.strip() for line in alias_analyzer.attr_docs[key])):
++                self.analyzer = alias_analyzer
++                self.directive.record_dependencies.add(alias_analyzer.srcname)
++                more_content = None
++            else:
++                try:
++                    more_content = StringList([_('alias of %s') % restify(self.object)],
++                                              source='')
++                except AttributeError:
++                    pass  # Invalid class object is passed.
+ 
+         super().add_content(more_content)
+ 
+diff --git a/tests/roots/test-ext-autodoc/target/class_alias.py b/tests/roots/test-ext-autodoc/target/class_alias.py
+new file mode 100644
+index 000000000..6eb5c3d80
+--- /dev/null
++++ b/tests/roots/test-ext-autodoc/target/class_alias.py
+@@ -0,0 +1,4 @@
++from target.classes import Foo
++
++Alias = Foo
++"""Documentation for an alias imported from another module."""
+diff --git a/tests/roots/test-ext-autodoc/target/classes.py b/tests/roots/test-ext-autodoc/target/classes.py
+index a3b4c6477..c4a251a59 100644
+--- a/tests/roots/test-ext-autodoc/target/classes.py
++++ b/tests/roots/test-ext-autodoc/target/classes.py
+@@ -30,3 +30,12 @@ class Quux(List[Union[int, float]]):
+ 
+ 
+ Alias = Foo
++
++AliasWithDoc = Foo
++"""Documentation for the aliased class.
++
++This is a multiline docstring-comment.
++"""
++
++AliasWithEmptyDoc = Foo
++""""""
+diff --git a/tests/test_ext_autodoc_autoclass.py b/tests/test_ext_autodoc_autoclass.py
+index 096dc9397..048aefebc 100644
+--- a/tests/test_ext_autodoc_autoclass.py
++++ b/tests/test_ext_autodoc_autoclass.py
+@@ -311,6 +311,47 @@ def test_class_doc_from_both(app):
+     ]
+ 
+ 
++@pytest.mark.sphinx('html', testroot='ext-autodoc')
++def test_class_alias_having_doccomment(app):
++    actual = do_autodoc(app, 'class', 'target.classes.AliasWithDoc')
++    assert list(actual) == [
++        '',
++        '.. py:attribute:: AliasWithDoc',
++        '   :module: target.classes',
++        '',
++        '   Documentation for the aliased class.',
++        '',
++        '   This is a multiline docstring-comment.',
++        '',
++    ]
++
++
++@pytest.mark.sphinx('html', testroot='ext-autodoc')
++def test_class_alias_with_empty_doccomment(app):
++    actual = do_autodoc(app, 'class', 'target.classes.AliasWithEmptyDoc')
++    assert list(actual) == [
++        '',
++        '.. py:attribute:: AliasWithEmptyDoc',
++        '   :module: target.classes',
++        '',
++        '',
++        '   alias of :class:`target.classes.Foo`',
++    ]
++
++
++@pytest.mark.sphinx('html', testroot='ext-autodoc')
++def test_class_alias_with_doccomment_in_importing_module(app):
++    actual = do_autodoc(app, 'class', 'target.class_alias.Alias')
++    assert list(actual) == [
++        '',
++        '.. py:attribute:: Alias',
++        '   :module: target.class_alias',
++        '',
++        '   Documentation for an alias imported from another module.',
++        '',
++    ]
++
++
+ def test_class_alias(app):
+     def autodoc_process_docstring(*args):
+         """A handler always raises an error.

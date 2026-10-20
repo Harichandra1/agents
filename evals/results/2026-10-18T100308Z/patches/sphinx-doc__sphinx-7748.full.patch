@@ -1,0 +1,68 @@
+diff --git a/sphinx/ext/autodoc/__init__.py b/sphinx/ext/autodoc/__init__.py
+index f8e4be999..4b169aa59 100644
+--- a/sphinx/ext/autodoc/__init__.py
++++ b/sphinx/ext/autodoc/__init__.py
+@@ -1037,7 +1037,8 @@ class DocstringSignatureMixin:
+     feature of reading the signature from the docstring.
+     """
+ 
+-    def _find_signature(self, encoding: str = None) -> Tuple[str, str]:
++    def _find_signature(self, encoding: str = None
++                        ) -> Optional[List[Tuple[Optional[str], Optional[str]]]]:
+         if encoding is not None:
+             warnings.warn("The 'encoding' argument to autodoc.%s._find_signature() is "
+                           "deprecated." % self.__class__.__name__,
+@@ -1062,11 +1063,24 @@ class DocstringSignatureMixin:
+                     valid_names.extend(cls.__name__ for cls in self.object.__mro__)
+             if base not in valid_names:
+                 continue
++
++            signatures = [(args, retann)]
++            # A docstring may start with several signatures for an overloaded
++            # function or method.  Treat consecutive matching lines as
++            # signatures, and leave the rest of the docstring as its body.
++            signature_lines = 1
++            for line in doclines[1:]:
++                match = py_ext_sig_re.match(line)
++                if not match or match.group(3) != base:
++                    break
++                signatures.append((match.group(4), match.group(5)))
++                signature_lines += 1
++
+             # re-prepare docstring to ignore more leading indentation
+             tab_width = self.directive.state.document.settings.tab_width  # type: ignore
+-            self._new_docstrings[i] = prepare_docstring('\n'.join(doclines[1:]),
+-                                                        tabsize=tab_width)
+-            result = args, retann
++            self._new_docstrings[i] = prepare_docstring(
++                '\n'.join(doclines[signature_lines:]), tabsize=tab_width)
++            result = signatures
+             # don't look any further
+             break
+         return result
+@@ -1087,7 +1101,15 @@ class DocstringSignatureMixin:
+             # the feature is enabled
+             result = self._find_signature()
+             if result is not None:
+-                self.args, self.retann = result
++                signatures = []
++                try:
++                    for args, retann in result:
++                        self.args, self.retann = args, retann
++                        signature = super().format_signature(**kwargs)  # type: ignore
++                        signatures.append(signature)
++                finally:
++                    self.args, self.retann = result[0]
++                return '\n'.join(signatures)
+         return super().format_signature(**kwargs)  # type: ignore
+ 
+ 
+@@ -1105,7 +1127,7 @@ class DocstringStripSignatureMixin(DocstringSignatureMixin):
+                 # Discarding _args is a only difference with
+                 # DocstringSignatureMixin.format_signature.
+                 # Documenter.format_signature use self.args value to format.
+-                _args, self.retann = result
++                _args, self.retann = result[0]
+         return super().format_signature(**kwargs)
+ 
+ 

@@ -1,0 +1,22 @@
+diff --git a/django/utils/http.py b/django/utils/http.py
+index 572cfb4347..6041973ec6 100755
+--- a/django/utils/http.py
++++ b/django/utils/http.py
+@@ -174,8 +174,15 @@ def parse_http_date(date):
+     else:
+         raise ValueError("%r is not in a valid HTTP date format" % date)
+     try:
+-        year = int(m.group('year'))
+-        if year < 100:
++        year_string = m.group('year')
++        year = int(year_string)
++        if len(year_string) == 2:
++            current_year = datetime.datetime.utcnow().year
++            current_century = current_year - current_year % 100
++            year += current_century
++            if year - current_year > 50:
++                year -= 100
++        elif year < 100:
+             if year < 70:
+                 year += 2000
+             else:

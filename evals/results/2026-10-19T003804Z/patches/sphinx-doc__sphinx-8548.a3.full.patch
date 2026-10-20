@@ -1,0 +1,172 @@
+diff --git a/sphinx/ext/autodoc/__init__.py b/sphinx/ext/autodoc/__init__.py
+index ddfd2b365..683393099 100644
+--- a/sphinx/ext/autodoc/__init__.py
++++ b/sphinx/ext/autodoc/__init__.py
+@@ -26,8 +26,8 @@ from sphinx.config import ENUM, Config
+ from sphinx.deprecation import (RemovedInSphinx40Warning, RemovedInSphinx50Warning,
+                                 RemovedInSphinx60Warning)
+ from sphinx.environment import BuildEnvironment
+-from sphinx.ext.autodoc.importer import (get_class_members, get_module_members,
+-                                         get_object_members, import_object)
++from sphinx.ext.autodoc.importer import (get_class_attribute_docs, get_class_members,
++                                         get_module_members, get_object_members, import_object)
+ from sphinx.ext.autodoc.mock import mock
+ from sphinx.locale import _, __
+ from sphinx.pycode import ModuleAnalyzer, PycodeError
+@@ -594,18 +594,28 @@ class Documenter:
+ 
+         # set sourcename and add content from attribute documentation
+         sourcename = self.get_sourcename()
+-        if self.analyzer:
+-            attr_docs = self.analyzer.find_attr_docs()
+-            if self.objpath:
+-                key = ('.'.join(self.objpath[:-1]), self.objpath[-1])
+-                if key in attr_docs:
+-                    no_docstring = True
+-                    # make a copy of docstring for attributes to avoid cache
+-                    # the change of autodoc-process-docstring event.
+-                    docstrings = [list(attr_docs[key])]
++        attr_doc = None
++        attr_analyzer = self.analyzer
++        if self.analyzer and self.objpath:
++            key = ('.'.join(self.objpath[:-1]), self.objpath[-1])
++            attr_doc = self.analyzer.find_attr_docs().get(key)
++
++        if (attr_doc is None and self.objtype == 'attribute' and self.objpath and
++                inspect.isclass(self.parent)):
++            result = get_class_attribute_docs(self.parent, self.objpath[-1])
++            if result:
++                attr_analyzer, attr_doc = result
++                self.directive.filename_set.add(attr_analyzer.srcname)
++                sourcename = '%s:docstring of %s' % (attr_analyzer.srcname, self.fullname)
+ 
+-                    for i, line in enumerate(self.process_doc(docstrings)):
+-                        self.add_line(line, sourcename, i)
++        if attr_doc is not None:
++            no_docstring = True
++            # make a copy of docstring for attributes to avoid cache
++            # the change of autodoc-process-docstring event.
++            docstrings = [list(attr_doc)]
++
++            for i, line in enumerate(self.process_doc(docstrings)):
++                self.add_line(line, sourcename, i)
+ 
+         # add content from docstrings
+         if not no_docstring:
+@@ -704,6 +714,14 @@ class Documenter:
+                 # Ignore non-string __doc__
+                 doc = None
+ 
++            attr_doc = attr_docs.get((namespace, membername))
++            if attr_doc is None and inspect.isclass(self.object):
++                result = get_class_attribute_docs(self.object, membername)
++                if result:
++                    _, attr_doc = result
++            if attr_doc is not None:
++                doc = '\n'.join(attr_doc)
++
+             # if the member __doc__ is the same as self's __doc__, it's just
+             # inherited and therefore not the member's doc
+             cls = self.get_attr(member, '__class__', None)
+@@ -746,7 +764,7 @@ class Documenter:
+                         keep = has_doc or self.options.undoc_members
+                 else:
+                     keep = False
+-            elif (namespace, membername) in attr_docs:
++            elif attr_doc is not None:
+                 if want_all and isprivate:
+                     if self.options.private_members is None:
+                         keep = False
+diff --git a/sphinx/ext/autodoc/importer.py b/sphinx/ext/autodoc/importer.py
+index d6e73d36a..1befee3b2 100644
+--- a/sphinx/ext/autodoc/importer.py
++++ b/sphinx/ext/autodoc/importer.py
+@@ -14,6 +14,7 @@ import warnings
+ from typing import Any, Callable, Dict, List, Mapping, NamedTuple, Optional, Tuple
+ 
+ from sphinx.deprecation import RemovedInSphinx40Warning, deprecated_alias
++from sphinx.errors import PycodeError
+ from sphinx.pycode import ModuleAnalyzer
+ from sphinx.util import logging
+ from sphinx.util.inspect import (getannotations, getmro, getslots, isclass, isenumclass,
+@@ -238,6 +239,21 @@ def get_object_members(subject: Any, objpath: List[str], attrgetter: Callable,
+             if namespace == ns and name not in members:
+                 members[name] = Attribute(name, True, INSTANCEATTR)
+ 
++    # append inherited instance attributes (cf. self.attr1) from base classes
++    for cls in getmro(subject)[1:]:
++        try:
++            module = safe_getattr(cls, '__module__')
++            qualname = safe_getattr(cls, '__qualname__')
++            if not module or not qualname:
++                continue
++
++            base_analyzer = ModuleAnalyzer.for_module(module)
++            for (namespace, name) in base_analyzer.find_attr_docs():
++                if namespace == qualname and name not in members:
++                    members[name] = Attribute(name, False, INSTANCEATTR)
++        except (AttributeError, PycodeError):
++            continue
++
+     return members
+ 
+ 
+@@ -251,6 +267,29 @@ class ClassAttribute:
+         self.docstring = docstring
+ 
+ 
++def get_class_attribute_docs(subject: Any, name: str
++                             ) -> Optional[Tuple[ModuleAnalyzer, List[str]]]:
++    """Find the documentation for an attribute on a class or one of its bases."""
++    for cls in getmro(subject):
++        try:
++            module = safe_getattr(cls, '__module__')
++            qualname = safe_getattr(cls, '__qualname__')
++            if module and qualname:
++                analyzer = ModuleAnalyzer.for_module(module)
++                key = (qualname, name)
++                attr_docs = analyzer.find_attr_docs()
++                if key in attr_docs:
++                    return analyzer, attr_docs[key]
++        except (AttributeError, PycodeError):
++            pass
++
++        if name in safe_getattr(cls, '__dict__', {}):
++            # An override in a subclass has no documentation to inherit from a base.
++            return None
++
++    return None
++
++
+ def get_class_members(subject: Any, objpath: List[str], attrgetter: Callable,
+                       analyzer: ModuleAnalyzer = None) -> Dict[str, ClassAttribute]:
+     """Get members and attributes of target class."""
+@@ -310,11 +349,27 @@ def get_class_members(subject: Any, objpath: List[str], attrgetter: Callable,
+     if analyzer:
+         # append instance attributes (cf. self.attr1) if analyzer knows
+         namespace = '.'.join(objpath)
+-        for (ns, name), docstring in analyzer.attr_docs.items():
++        for (ns, name), docstring in analyzer.find_attr_docs().items():
+             if namespace == ns and name not in members:
+                 members[name] = ClassAttribute(subject, name, INSTANCEATTR,
+                                                '\n'.join(docstring))
+ 
++    # append inherited instance attributes (cf. self.attr1) from base classes
++    for cls in getmro(subject)[1:]:
++        try:
++            module = safe_getattr(cls, '__module__')
++            qualname = safe_getattr(cls, '__qualname__')
++            if not module or not qualname:
++                continue
++
++            base_analyzer = ModuleAnalyzer.for_module(module)
++            for (namespace, name), docstring in base_analyzer.find_attr_docs().items():
++                if namespace == qualname and name not in members:
++                    members[name] = ClassAttribute(cls, name, INSTANCEATTR,
++                                                   '\n'.join(docstring))
++        except (AttributeError, PycodeError):
++            continue
++
+     return members
+ 
+ 

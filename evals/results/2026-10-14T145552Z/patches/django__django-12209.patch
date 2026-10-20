@@ -1,0 +1,54 @@
+diff --git a/django/db/models/base.py b/django/db/models/base.py
+index e3b14a41a0..a69183c55e 100644
+--- a/django/db/models/base.py
++++ b/django/db/models/base.py
+@@ -414,6 +414,13 @@ class Model(metaclass=ModelBase):
+ 
+         # Set up the storage for instance state
+         self._state = ModelState()
++        # An explicit PK should still try an UPDATE when the field has a default.
++        pk_field = opts.pk
++        pk_fields = opts.fields if kwargs else opts.concrete_fields
++        self._state.pk_was_set = (
++            any(field.primary_key and val is not _DEFERRED for val, field in zip(args, pk_fields)) or
++            pk_field.name in kwargs or pk_field.attname in kwargs or 'pk' in kwargs
++        )
+ 
+         # There is a rather weird disparity here; if kwargs, it's set, then args
+         # overrides it. It should be one or the other; don't duplicate the work
+@@ -852,7 +859,8 @@ class Model(metaclass=ModelBase):
+             not force_insert and
+             self._state.adding and
+             self._meta.pk.default and
+-            self._meta.pk.default is not NOT_PROVIDED
++            self._meta.pk.default is not NOT_PROVIDED and
++            not self._state.pk_was_set
+         ):
+             force_insert = True
+         # If possible, try an UPDATE. If that doesn't update anything, do an INSERT.
+diff --git a/tests/basic/models.py b/tests/basic/models.py
+index 7b2b1aee54..b8978666fe 100644
+--- a/tests/basic/models.py
++++ b/tests/basic/models.py
+@@ -46,3 +46,4 @@ class SelfRef(models.Model):
+ 
+ class PrimaryKeyWithDefault(models.Model):
+     uuid = models.UUIDField(primary_key=True, default=uuid.uuid4)
++    name = models.CharField(max_length=100, blank=True)
+diff --git a/tests/basic/tests.py b/tests/basic/tests.py
+index 5eada343e1..302766a4d2 100644
+--- a/tests/basic/tests.py
++++ b/tests/basic/tests.py
+@@ -139,6 +139,12 @@ class ModelInstanceCreationTests(TestCase):
+         with self.assertNumQueries(1):
+             PrimaryKeyWithDefault().save()
+ 
++    def test_save_with_explicit_primary_key_with_default(self):
++        obj = PrimaryKeyWithDefault.objects.create(name='Original')
++        instance = PrimaryKeyWithDefault(pk=obj.pk, name='Updated')
++        instance.save()
++        self.assertEqual(PrimaryKeyWithDefault.objects.get(pk=obj.pk).name, 'Updated')
++
+ 
+ class ModelTest(TestCase):
+     def test_objects_attribute_is_only_available_on_the_class_itself(self):

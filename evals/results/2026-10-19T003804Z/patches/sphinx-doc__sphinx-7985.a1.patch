@@ -1,0 +1,110 @@
+diff --git a/doc/usage/configuration.rst b/doc/usage/configuration.rst
+index eba6904c4..f28cb0d85 100644
+--- a/doc/usage/configuration.rst
++++ b/doc/usage/configuration.rst
+@@ -2400,6 +2400,15 @@ Options for the linkcheck builder
+ 
+    .. versionadded:: 1.1
+ 
++.. confval:: linkcheck_check_local
++
++   If true, check that relative local links point to existing files in the
++   source directory. Links with absolute paths or paths outside the source
++   directory are not checked. Default is ``True``. Set this to ``False`` to
++   disable local link checking.
++
++   .. versionadded:: 3.2
++
+ .. confval:: linkcheck_request_headers
+ 
+    A dictionary that maps baseurls to HTTP request headers.
+diff --git a/sphinx/builders/linkcheck.py b/sphinx/builders/linkcheck.py
+index dd5317087..3c533022b 100644
+--- a/sphinx/builders/linkcheck.py
++++ b/sphinx/builders/linkcheck.py
+@@ -208,31 +208,68 @@ class CheckExternalLinksBuilder(Builder):
+                 else:
+                     return 'redirected', new_url, 0
+ 
++        def check_local_uri() -> Tuple[str, str, int]:
++            parsed = urlparse(uri)
++            # Links without a URL scheme are relative to the source document.
++            # Absolute paths cannot be checked reliably as their location in
++            # the published site is not known to Sphinx.
++            if parsed.scheme or not parsed.path or path.isabs(parsed.path):
++                return 'local', '', 0
++
++            local_path = unquote(parsed.path)
++            if '\x00' in local_path:
++                return 'local', '', 0
++
++            try:
++                srcdir = path.realpath(self.srcdir)
++                docpath = path.dirname(self.env.doc2path(docname, None))
++                target = path.realpath(path.join(srcdir, docpath, local_path))
++                if path.commonpath([srcdir, target]) != srcdir:
++                    return 'local', '', 0
++
++                if path.exists(target):
++                    return 'working', '', 0
++                else:
++                    return 'broken', "Local file not found: %s" % parsed.path, 0
++            except (OSError, ValueError):
++                # Malformed paths should not make the worker thread fail;
++                # leave them unchecked as before.
++                return 'local', '', 0
++
+         def check() -> Tuple[str, str, int]:
+             # check for various conditions without bothering the network
+             if len(uri) == 0 or uri.startswith(('#', 'mailto:', 'ftp:')):
+                 return 'unchecked', '', 0
+-            elif not uri.startswith(('http:', 'https:')):
++
++            local_link = not uri.startswith(('http:', 'https:'))
++            if local_link and not self.config.linkcheck_check_local:
+                 return 'local', '', 0
+-            elif uri in self.good:
++            # Relative local URIs can refer to different paths in different
++            # documents, so only cache remote URIs by their URI.
++            elif not local_link and uri in self.good:
+                 return 'working', 'old', 0
+-            elif uri in self.broken:
++            elif not local_link and uri in self.broken:
+                 return 'broken', self.broken[uri], 0
+-            elif uri in self.redirected:
++            elif not local_link and uri in self.redirected:
+                 return 'redirected', self.redirected[uri][0], self.redirected[uri][1]
+             for rex in self.to_ignore:
+                 if rex.match(uri):
+                     return 'ignored', '', 0
+ 
+             # need to actually check the URI
+-            for _ in range(self.app.config.linkcheck_retries):
+-                status, info, code = check_uri()
+-                if status != "broken":
+-                    break
++            if local_link:
++                status, info, code = check_local_uri()
++            else:
++                for _ in range(self.app.config.linkcheck_retries):
++                    status, info, code = check_uri()
++                    if status != "broken":
++                        break
+ 
+             if status == "working":
+-                self.good.add(uri)
++                if not local_link:
++                    self.good.add(uri)
+             elif status == "broken":
++                # write_doc() uses this collection to set the failure status.
+                 self.broken[uri] = info
+             elif status == "redirected":
+                 self.redirected[uri] = (info, code)
+@@ -361,6 +398,7 @@ def setup(app: Sphinx) -> Dict[str, Any]:
+     app.add_config_value('linkcheck_retries', 1, None)
+     app.add_config_value('linkcheck_timeout', None, None, [int])
+     app.add_config_value('linkcheck_workers', 5, None)
++    app.add_config_value('linkcheck_check_local', True, None)
+     app.add_config_value('linkcheck_anchors', True, None)
+     # Anchors starting with ! are ignored since they are
+     # commonly used for dynamic pages

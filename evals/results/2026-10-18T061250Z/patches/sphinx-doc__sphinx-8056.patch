@@ -1,0 +1,33 @@
+diff --git a/sphinx/ext/napoleon/docstring.py b/sphinx/ext/napoleon/docstring.py
+index b3daa06f1..dc29e373b 100644
+--- a/sphinx/ext/napoleon/docstring.py
++++ b/sphinx/ext/napoleon/docstring.py
+@@ -394,13 +394,22 @@ class GoogleDocstring:
+             _desc = self._strip_empty(_desc)
+             if any(_desc):
+                 _desc = self._fix_field_desc(_desc)
+-                field = ':%s %s: ' % (field_role, _name)
+-                lines.extend(self._format_block(field, _desc))
+-            else:
+-                lines.append(':%s %s:' % (field_role, _name))
+ 
+-            if _type:
+-                lines.append(':%s %s: %s' % (type_role, _name, _type))
++            # Sphinx's typed parameter fields interpret ``:param type name:``
++            # as a typed parameter.  A comma-separated NumPy parameter name
++            # would therefore be mistaken for a type and a single parameter.
++            # Emit one field per name so that both the names and their shared
++            # type are retained by the field transformer.
++            names = [name.strip() for name in _name.split(',')]
++            for name in names:
++                if any(_desc):
++                    field = ':%s %s: ' % (field_role, name)
++                    lines.extend(self._format_block(field, _desc))
++                else:
++                    lines.append(':%s %s:' % (field_role, name))
++
++                if _type:
++                    lines.append(':%s %s: %s' % (type_role, name, _type))
+         return lines + ['']
+ 
+     def _format_field(self, _name: str, _type: str, _desc: List[str]) -> List[str]:

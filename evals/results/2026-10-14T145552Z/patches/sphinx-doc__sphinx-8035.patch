@@ -1,0 +1,105 @@
+diff --git a/CHANGES b/CHANGES
+index eadace6dc..99b7de297 100644
+--- a/CHANGES
++++ b/CHANGES
+@@ -17,6 +17,7 @@ Deprecated
+ Features added
+ --------------
+ 
++* #8035: autodoc: Allow selecting specific members with ``private-members``.
+ * #2076: autodoc: Allow overriding of exclude-members in skip-member function
+ * #2024: autosummary: Add :confval:`autosummary_filename_map` to avoid conflict
+   of filenames between two object with different case
+diff --git a/doc/usage/extensions/autodoc.rst b/doc/usage/extensions/autodoc.rst
+index 150b62c4d..bdab18306 100644
+--- a/doc/usage/extensions/autodoc.rst
++++ b/doc/usage/extensions/autodoc.rst
+@@ -136,10 +136,20 @@ inserting them into the page source under a suitable :rst:dir:`py:module`,
+            :undoc-members:
+ 
+    * "Private" members (that is, those named like ``_private`` or ``__private``)
+-     will be included if the ``private-members`` flag option is given.
++     will be included if the ``private-members`` option is given.  You can list
++     specific private members as an argument, just like with ``members``::
++
++        .. autoclass:: Noodle
++           :members:
++           :private-members: _secret, _protected
++
++     If no argument is given, all private members will be included.
+ 
+      .. versionadded:: 1.1
+ 
++     .. versionchanged:: 3.2
++        The option can now take arguments to select specific members.
++
+    * autodoc considers a member private if its docstring contains
+      ``:meta private:`` in its :ref:`info-field-lists`.
+      For example:
+diff --git a/sphinx/ext/autodoc/__init__.py b/sphinx/ext/autodoc/__init__.py
+index 8c3509c3b..8aff6217a 100644
+--- a/sphinx/ext/autodoc/__init__.py
++++ b/sphinx/ext/autodoc/__init__.py
+@@ -649,14 +649,18 @@ class Documenter:
+             elif (namespace, membername) in attr_docs:
+                 if want_all and isprivate:
+                     # ignore members whose name starts with _ by default
+-                    keep = self.options.private_members
++                    keep = self.options.private_members is ALL or (
++                        self.options.private_members is not None and
++                        membername in self.options.private_members)
+                 else:
+                     # keep documented attributes
+                     keep = True
+                 isattr = True
+             elif want_all and isprivate:
+                 # ignore members whose name starts with _ by default
+-                keep = self.options.private_members and \
++                keep = (self.options.private_members is ALL or
++                        (self.options.private_members is not None and
++                         membername in self.options.private_members)) and \
+                     (has_doc or self.options.undoc_members)
+             else:
+                 if self.options.members is ALL and is_filtered_inherited_member(membername):
+@@ -859,7 +863,7 @@ class ModuleDocumenter(Documenter):
+         'show-inheritance': bool_option, 'synopsis': identity,
+         'platform': identity, 'deprecated': bool_option,
+         'member-order': member_order_option, 'exclude-members': members_set_option,
+-        'private-members': bool_option, 'special-members': members_option,
++        'private-members': members_option, 'special-members': members_option,
+         'imported-members': bool_option, 'ignore-module-all': bool_option
+     }  # type: Dict[str, Callable]
+ 
+@@ -1279,7 +1283,7 @@ class ClassDocumenter(DocstringSignatureMixin, ModuleLevelDocumenter):  # type:
+         'noindex': bool_option, 'inherited-members': inherited_members_option,
+         'show-inheritance': bool_option, 'member-order': member_order_option,
+         'exclude-members': members_set_option,
+-        'private-members': bool_option, 'special-members': members_option,
++        'private-members': members_option, 'special-members': members_option,
+     }  # type: Dict[str, Callable]
+ 
+     _signature_class = None  # type: Any
+diff --git a/tests/test_ext_autodoc_private_members.py b/tests/test_ext_autodoc_private_members.py
+index f4cadd3a5..1b8543738 100644
+--- a/tests/test_ext_autodoc_private_members.py
++++ b/tests/test_ext_autodoc_private_members.py
+@@ -33,6 +33,19 @@ def test_private_field(app):
+     ]
+ 
+ 
++@pytest.mark.sphinx('html', testroot='ext-autodoc')
++def test_private_members(app):
++    app.config.autoclass_content = 'class'
++    options = {"members": None,
++               "undoc-members": True,
++               "private-members": "_private_inst_attr"}
++    actual = do_autodoc(app, 'class', 'target.Class', options)
++    member_directives = [line.strip() for line in actual if '::' in line]
++    assert '   .. py:attribute:: Class._private_inst_attr' in actual
++    assert not any('_private' in line and '_private_inst_attr' not in line
++                   for line in member_directives)
++
++
+ @pytest.mark.sphinx('html', testroot='ext-autodoc')
+ def test_private_field_and_private_members(app):
+     app.config.autoclass_content = 'class'

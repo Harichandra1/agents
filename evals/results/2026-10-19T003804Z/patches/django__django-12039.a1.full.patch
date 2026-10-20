@@ -1,0 +1,81 @@
+diff --git a/django/db/backends/ddl_references.py b/django/db/backends/ddl_references.py
+index 44e49806f8..6e2da4a44a 100644
+--- a/django/db/backends/ddl_references.py
++++ b/django/db/backends/ddl_references.py
+@@ -84,9 +84,12 @@ class Columns(TableColumns):
+     def __str__(self):
+         def col_str(column, idx):
+             try:
+-                return self.quote_name(column) + self.col_suffixes[idx]
++                suffix = self.col_suffixes[idx]
+             except IndexError:
++                suffix = ''
++            if isinstance(suffix, str) and str.__len__(suffix) == 0:
+                 return self.quote_name(column)
++            return self.quote_name(column) + ' ' + suffix
+ 
+         return ', '.join(col_str(column, idx) for idx, column in enumerate(self.columns))
+ 
+@@ -114,9 +117,11 @@ class IndexColumns(Columns):
+             # length as self.columns.
+             col = '{} {}'.format(self.quote_name(column), self.opclasses[idx])
+             try:
+-                col = '{} {}'.format(col, self.col_suffixes[idx])
++                suffix = self.col_suffixes[idx]
+             except IndexError:
+-                pass
++                suffix = ''
++            if not (isinstance(suffix, str) and str.__len__(suffix) == 0):
++                col = '{} {}'.format(col, suffix)
+             return col
+ 
+         return ', '.join(col_str(column, idx) for idx, column in enumerate(self.columns))
+diff --git a/tests/backends/test_ddl_references.py b/tests/backends/test_ddl_references.py
+index d96ebcb57f..8f7bac487d 100644
+--- a/tests/backends/test_ddl_references.py
++++ b/tests/backends/test_ddl_references.py
+@@ -1,5 +1,5 @@
+ from django.db.backends.ddl_references import (
+-    Columns, ForeignKeyName, IndexName, Statement, Table,
++    Columns, ForeignKeyName, IndexColumns, IndexName, Statement, Table,
+ )
+ from django.test import SimpleTestCase
+ 
+@@ -57,6 +57,21 @@ class ColumnsTests(TableTests):
+         self.assertEqual(str(self.reference), 'FIRST_COLUMN, SECOND_COLUMN')
+ 
+ 
++class IndexColumnsTests(SimpleTestCase):
++    def setUp(self):
++        self.reference = IndexColumns(
++            'table', ['column'], lambda column: '"%s"' % column,
++            col_suffixes=[''], opclasses=['text_pattern_ops'],
++        )
++
++    def test_str_empty_col_suffix(self):
++        self.assertEqual(str(self.reference), '"column" text_pattern_ops')
++
++    def test_str_descending_col_suffix(self):
++        self.reference.col_suffixes = ['DESC']
++        self.assertEqual(str(self.reference), '"column" text_pattern_ops DESC')
++
++
+ class IndexNameTests(ColumnsTests):
+     def setUp(self):
+         def create_index_name(table_name, column_names, suffix):
+diff --git a/tests/indexes/tests.py b/tests/indexes/tests.py
+index 588feaddff..ca6c4fd755 100644
+--- a/tests/indexes/tests.py
++++ b/tests/indexes/tests.py
+@@ -34,6 +34,11 @@ class SchemaIndexesTests(TestCase):
+         )
+         self.assertEqual(index_name, "indexes_article_c1_a52bd80b123")
+ 
++    def test_descending_columns_list_sql(self):
++        index = Index(fields=['-headline'], name='test_descending')
++        sql = str(index.create_sql(Article, connection.schema_editor()))
++        self.assertIn('%s DESC' % connection.ops.quote_name('headline'), sql)
++
+     def test_index_name(self):
+         """
+         Index names on the built-in database backends::

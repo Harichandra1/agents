@@ -1,0 +1,55 @@
+diff --git a/doc/extdev/appapi.rst b/doc/extdev/appapi.rst
+index 78e88b063..f845dd536 100644
+--- a/doc/extdev/appapi.rst
++++ b/doc/extdev/appapi.rst
+@@ -250,8 +250,9 @@ Here is a more detailed list of these events.
+ 
+ .. event:: source-read (app, docname, source)
+ 
+-   Emitted when a source file has been read.  The *source* argument is a list
+-   whose single element is the contents of the source file.  You can process the
++   Emitted when a source file has been read and when the :rst:dir:`include`
++   directive inserts a file as reStructuredText input.  The *source* argument
++   is a list whose single element is the source text.  You can process the
+    contents and replace this item to implement source-level transformations.
+ 
+    For example, if you want to use ``$`` signs to delimit inline math, like in
+diff --git a/sphinx/directives/other.py b/sphinx/directives/other.py
+index 19f7c0a8d..62c647265 100644
+--- a/sphinx/directives/other.py
++++ b/sphinx/directives/other.py
+@@ -369,6 +369,34 @@ class Include(BaseInclude, SphinxDirective):
+     """
+ 
+     def run(self) -> list[Node]:
++        state_machine = self.state_machine
++        original_insert_input = state_machine.insert_input
++        had_instance_insert_input = 'insert_input' in state_machine.__dict__
++        instance_insert_input = state_machine.__dict__.get('insert_input')
++
++        def insert_input(include_lines: list[str], path: str) -> None:
++            # The source-read event is normally emitted when a document is read,
++            # but included files are read later by docutils' Include directive.
++            # Emit it here, just before the included lines are parsed.
++            end_marker = f'.. end of inclusion from "{path}"'
++            if include_lines[-2:] == ['', end_marker]:
++                include_lines = include_lines[:-2]
++            source = ['\n'.join(include_lines)]
++            docname = self.env.path2doc(path) or path
++            self.env.events.emit('source-read', docname, source)
++            include_lines = source[0].splitlines()
++            include_lines.extend(('', end_marker))
++            original_insert_input(include_lines, path)
++
++        state_machine.insert_input = insert_input
++        try:
++            return self._run_include()
++        finally:
++            del state_machine.insert_input
++            if had_instance_insert_input:
++                state_machine.insert_input = instance_insert_input
++
++    def _run_include(self) -> list[Node]:
+         if self.arguments[0].startswith('<') and \
+            self.arguments[0].endswith('>'):
+             # docutils "standard" includes, do not do path processing

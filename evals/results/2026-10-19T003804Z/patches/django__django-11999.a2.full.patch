@@ -1,0 +1,36 @@
+diff --git a/django/db/models/fields/__init__.py b/django/db/models/fields/__init__.py
+index ee45bb941e..58cefec53a 100755
+--- a/django/db/models/fields/__init__.py
++++ b/django/db/models/fields/__init__.py
+@@ -763,8 +763,29 @@ class Field(RegisterLookupMixin):
+             if not getattr(cls, self.attname, None):
+                 setattr(cls, self.attname, self.descriptor_class(self))
+         if self.choices is not None:
+-            setattr(cls, 'get_%s_display' % self.name,
+-                    partialmethod(cls._get_FIELD_display, field=self))
++            get_display = 'get_%s_display' % self.name
++            # Rebind an inherited generated method, but don't override a
++            # user-defined method on this model or a parent model.
++            for base in cls.__mro__:
++                if get_display in base.__dict__:
++                    display_method = base.__dict__[get_display]
++                    if (
++                        (
++                            isinstance(display_method, partialmethod) and
++                            getattr(display_method.func, '__name__', None) == '_get_FIELD_display' and
++                            isinstance(display_method.keywords, dict) and
++                            'field' in display_method.keywords
++                        ) or (
++                            not callable(display_method) and
++                            not hasattr(display_method, '__get__')
++                        )
++                    ):
++                        setattr(cls, get_display,
++                                partialmethod(cls._get_FIELD_display, field=self))
++                    break
++            else:
++                setattr(cls, get_display,
++                        partialmethod(cls._get_FIELD_display, field=self))
+ 
+     def get_filter_kwargs_for_object(self, obj):
+         """

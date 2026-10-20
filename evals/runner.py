@@ -28,6 +28,7 @@ from langchain_core.messages import HumanMessage
 from langchain_core.tracers.langchain import wait_for_all_tracers
 
 from evals.tasks.catalog import TASKS, Task, task_by_id
+from harness.agent import invoke_config
 
 ROOT = Path(__file__).resolve().parent
 REPO_ROOT = ROOT.parent
@@ -52,6 +53,53 @@ def copy_toy_repo(dest: Path) -> None:
         dest,
         ignore=shutil.ignore_patterns("__pycache__", ".pytest_cache", "*.pyc"),
     )
+
+
+def ensure_git_base(workspace: Path) -> None:
+    """Snapshot the workspace so we can save a git diff after the agent."""
+    if not (workspace / ".git").exists():
+        subprocess.run(["git", "init"], cwd=workspace, check=True, capture_output=True)
+        subprocess.run(["git", "add", "-A"], cwd=workspace, check=True, capture_output=True)
+        subprocess.run(
+            [
+                "git",
+                "-c",
+                "user.email=eval@harness.local",
+                "-c",
+                "user.name=eval",
+                "commit",
+                "-m",
+                "eval-base",
+                "--quiet",
+            ],
+            cwd=workspace,
+            check=True,
+            capture_output=True,
+        )
+
+
+def capture_patch(workspace: Path) -> str:
+    subprocess.run(["git", "add", "-A"], cwd=workspace, capture_output=True)
+    proc = subprocess.run(
+        ["git", "diff", "--cached", "HEAD"],
+        cwd=workspace,
+        capture_output=True,
+        text=True,
+    )
+    return proc.stdout or ""
+
+
+def unique_run_dir() -> Path:
+    RESULTS.mkdir(parents=True, exist_ok=True)
+    stamp = datetime.now(UTC).strftime("%Y-%m-%dT%H%M%SZ")
+    path = RESULTS / stamp
+    extra = 1
+    while path.exists():
+        path = RESULTS / f"{stamp}-{extra}"
+        extra += 1
+    path.mkdir(parents=True)
+    (path / "patches").mkdir()
+    return path
 
 
 def check_file_contains(workspace: Path, task: Task) -> list[str]:
@@ -101,35 +149,43 @@ def score_workspace(workspace: Path, task: Task, llm_calls: int) -> dict:
     }
 
 
-def run_task(task: Task) -> dict:
+def run_task(task: Task, patch_dir: Path | None = None) -> dict:
     from harness.agent import build_loop_graph
 
     with tempfile.TemporaryDirectory() as tmp:
         workspace = Path(tmp) / "repo"
         copy_toy_repo(workspace)
+        ensure_git_base(workspace)
         graph = build_loop_graph(workspace=workspace)
-        result = graph.invoke(
-            {"messages": [HumanMessage(content=task["prompt"])], "llm_calls": 0},
-            config={
-                "run_name": f"eval-{task['id']}",
-                "tags": ["day16", "custom-eval", task["tier"]],
-                "metadata": {"task": task["id"], "tier": task["tier"]},
-            },
-        )
+        try:
+            result = graph.invoke(
+                {"messages": [HumanMessage(content=task["prompt"])], "llm_calls": 0},
+                config=invoke_config(
+                    run_name=f"eval-{task['id']}",
+                    tags=["day16", "custom-eval", task["tier"]],
+                    metadata={"task": task["id"], "tier": task["tier"]},
+                ),
+            )
+        finally:
+            graph.close()
         llm_calls = int(result.get("llm_calls") or 0)
+        patch = capture_patch(workspace)
         row = score_workspace(workspace, task, llm_calls)
         row["plan"] = result.get("plan") or []
+        row["patch"] = patch
+        if patch_dir is not None:
+            (patch_dir / f"{task['id']}.patch").write_text(patch, encoding="utf-8")
         return row
 
 
-def append_results(rows: list[dict]) -> Path:
-    RESULTS.mkdir(parents=True, exist_ok=True)
-    stamp = datetime.now(UTC).strftime("%Y-%m-%dT%H%MZ")
-    path = RESULTS / f"{stamp}.jsonl"
-    with path.open("w", encoding="utf-8") as handle:
+def append_results(rows: list[dict], run_dir: Path) -> Path:
+    path = run_dir / "results.jsonl"
+    with path.open("a", encoding="utf-8") as handle:
         for row in rows:
-            handle.write(json.dumps(row) + "\n")
-    report_path = RESULTS / f"{stamp}-report.txt"
+            slim = {k: v for k, v in row.items() if k != "patch"}
+            slim["patch_file"] = f"patches/{row['id']}.patch"
+            handle.write(json.dumps(slim) + "\n")
+    report_path = run_dir / "report.txt"
     report_path.write_text(format_report(rows, jsonl=path), encoding="utf-8")
     return path
 
@@ -187,8 +243,9 @@ def format_report(rows: list[dict], jsonl: Path | None = None) -> str:
                 lines.append("    plan: " + " | ".join(plan))
     if jsonl is not None:
         lines.append("")
-        lines.append(f"JSONL:  {jsonl}")
-        lines.append(f"Report: {jsonl.with_name(jsonl.stem + '-report.txt')}")
+        lines.append(f"JSONL:   {jsonl}")
+        lines.append(f"Report:  {jsonl.with_name('report.txt')}")
+        lines.append(f"Patches: {jsonl.parent / 'patches'}")
     return "\n".join(lines) + "\n"
 
 
@@ -205,6 +262,7 @@ def crash_row(task: Task, exc: Exception) -> dict:
         "over_budget": False,
         "pytest_tail": "",
         "plan": [],
+        "patch": "",
         "error": f"{type(exc).__name__}: {exc}",
     }
 
@@ -212,11 +270,12 @@ def crash_row(task: Task, exc: Exception) -> dict:
 def run_eval(task_id: str | None) -> int:
     load_dotenv()
     tasks = [task_by_id(task_id)] if task_id else TASKS
+    run_dir = unique_run_dir()
     rows = []
     for task in tasks:
         print(f"\n=== {task['id']} ({task['tier']}) ===")
         try:
-            row = run_task(task)
+            row = run_task(task, patch_dir=run_dir / "patches")
         except Exception as exc:
             row = crash_row(task, exc)
             print(f"CRASH  {row['error']}")
@@ -236,7 +295,7 @@ def run_eval(task_id: str | None) -> int:
             for step in row["plan"]:
                 print(f"  - {step}")
     wait_for_all_tracers()
-    path = append_results(rows)
+    path = append_results(rows, run_dir)
     report = format_report(rows, jsonl=path)
     print("\n" + report)
     return 0 if all(row["pass"] for row in rows) else 1

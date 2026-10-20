@@ -1,0 +1,37 @@
+diff --git a/sphinx/util/inspect.py b/sphinx/util/inspect.py
+index 15f0d66e2..88fc6060a 100644
+--- a/sphinx/util/inspect.py
++++ b/sphinx/util/inspect.py
+@@ -520,15 +520,23 @@ def signature_from_str(signature: str) -> inspect.Signature:
+     args = definition.args
+     params = []
+ 
+-    if hasattr(args, "posonlyargs"):
+-        for arg in args.posonlyargs:  # type: ignore
+-            annotation = ast_unparse(arg.annotation) or Parameter.empty
+-            params.append(Parameter(arg.arg, Parameter.POSITIONAL_ONLY,
+-                                    annotation=annotation))
+-
+-    for i, arg in enumerate(args.args):
+-        if len(args.args) - i <= len(args.defaults):
+-            default = ast_unparse(args.defaults[-len(args.args) + i])
++    positional_only_args = getattr(args, "posonlyargs", [])
++    positional_args = positional_only_args + args.args
++    default_offset = len(positional_args) - len(args.defaults)
++
++    for i, arg in enumerate(positional_only_args):
++        if i >= default_offset:
++            default = ast_unparse(args.defaults[i - default_offset])
++        else:
++            default = Parameter.empty
++
++        annotation = ast_unparse(arg.annotation) or Parameter.empty
++        params.append(Parameter(arg.arg, Parameter.POSITIONAL_ONLY,
++                                default=default, annotation=annotation))
++
++    for i, arg in enumerate(args.args, start=len(positional_only_args)):
++        if i >= default_offset:
++            default = ast_unparse(args.defaults[i - default_offset])
+         else:
+             default = Parameter.empty
+ 

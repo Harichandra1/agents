@@ -1,0 +1,149 @@
+diff --git a/sphinx/domains/python.py b/sphinx/domains/python.py
+index d79de154e..55d25ea20 100644
+--- a/sphinx/domains/python.py
++++ b/sphinx/domains/python.py
+@@ -852,6 +852,7 @@ class PyProperty(PyObject):
+     option_spec = PyObject.option_spec.copy()
+     option_spec.update({
+         'abstractmethod': directives.flag,
++        'classmethod': directives.flag,
+         'type': directives.unchanged,
+     })
+ 
+@@ -866,6 +867,8 @@ class PyProperty(PyObject):
+ 
+     def get_signature_prefix(self, sig: str) -> str:
+         prefix = ['property']
++        if 'classmethod' in self.options:
++            prefix.insert(0, 'classmethod')
+         if 'abstractmethod' in self.options:
+             prefix.insert(0, 'abstract')
+ 
+@@ -883,7 +886,10 @@ class PyProperty(PyObject):
+             else:
+                 return name
+ 
+-        return _('%s (%s property)') % (attrname, clsname)
++        if 'classmethod' in self.options:
++            return _('%s (%s class property)') % (attrname, clsname)
++        else:
++            return _('%s (%s property)') % (attrname, clsname)
+ 
+ 
+ class PyDecoratorMixin:
+diff --git a/sphinx/ext/autodoc/__init__.py b/sphinx/ext/autodoc/__init__.py
+index 1cecb1f79..6dbca0689 100644
+--- a/sphinx/ext/autodoc/__init__.py
++++ b/sphinx/ext/autodoc/__init__.py
+@@ -2663,6 +2663,22 @@ class PropertyDocumenter(DocstringStripSignatureMixin, ClassLevelDocumenter):  #
+                             ) -> bool:
+         return inspect.isproperty(member) and isinstance(parent, ClassDocumenter)
+ 
++    def import_object(self, raiseerror: bool = False) -> bool:
++        ret = super().import_object(raiseerror)
++        self._is_classmethod_property = False
++        if ret:
++            for cls in inspect.getmro(self.parent):
++                member = cls.__dict__.get(self.object_name)
++                if inspect.isclassmethodproperty(member):
++                    # Importing the attribute normally invokes the wrapped
++                    # property.  Keep the property descriptor for its docstring
++                    # and signature instead.
++                    self.object = member.__func__
++                    self._is_classmethod_property = True
++                    break
++
++        return ret
++
+     def document_members(self, all_members: bool = False) -> None:
+         pass
+ 
+@@ -2673,6 +2689,8 @@ class PropertyDocumenter(DocstringStripSignatureMixin, ClassLevelDocumenter):  #
+     def add_directive_header(self, sig: str) -> None:
+         super().add_directive_header(sig)
+         sourcename = self.get_sourcename()
++        if self._is_classmethod_property:
++            self.add_line('   :classmethod:', sourcename)
+         if inspect.isabstractmethod(self.object):
+             self.add_line('   :abstractmethod:', sourcename)
+ 
+diff --git a/sphinx/ext/autodoc/importer.py b/sphinx/ext/autodoc/importer.py
+index 1a8ea0973..1721c89b8 100644
+--- a/sphinx/ext/autodoc/importer.py
++++ b/sphinx/ext/autodoc/importer.py
+@@ -17,8 +17,8 @@ from sphinx.deprecation import RemovedInSphinx50Warning
+ from sphinx.ext.autodoc.mock import ismock, undecorate
+ from sphinx.pycode import ModuleAnalyzer, PycodeError
+ from sphinx.util import logging
+-from sphinx.util.inspect import (getannotations, getmro, getslots, isclass, isenumclass,
+-                                 safe_getattr)
++from sphinx.util.inspect import (getannotations, getmro, getslots, isclass, isclassmethodproperty,
++                                 isenumclass, safe_getattr)
+ 
+ if False:
+     # For type annotation
+@@ -103,11 +103,24 @@ def import_object(modname: str, objpath: List[str], objtype: str = '',
+         obj = module
+         parent = None
+         object_name = None
+-        for attrname in objpath:
++        for i, attrname in enumerate(objpath):
+             parent = obj
+             logger.debug('[autodoc] getattr(_, %r)', attrname)
+             mangled_name = mangle(obj, attrname)
+-            obj = attrgetter(obj, mangled_name)
++            if objtype == 'property' and i == len(objpath) - 1 and isclass(obj):
++                member = None
++                for cls in getmro(obj):
++                    if mangled_name in cls.__dict__:
++                        member = cls.__dict__[mangled_name]
++                        break
++
++                if isclassmethodproperty(member):
++                    # Avoid invoking the wrapped property while importing it.
++                    obj = member.__func__
++                else:
++                    obj = attrgetter(obj, mangled_name)
++            else:
++                obj = attrgetter(obj, mangled_name)
+ 
+             try:
+                 logger.debug('[autodoc] => %r', obj)
+@@ -274,7 +287,19 @@ def get_class_members(subject: Any, objpath: List[str], attrgetter: Callable
+     # other members
+     for name in dir(subject):
+         try:
+-            value = attrgetter(subject, name)
++            raw_member = None
++            for cls in getmro(subject):
++                if name in cls.__dict__:
++                    raw_member = cls.__dict__[name]
++                    break
++
++            if isclassmethodproperty(raw_member):
++                # Accessing a classmethod wrapping a property invokes the
++                # property on Python 3.9, returning its value instead of the
++                # descriptor needed to document it.
++                value = raw_member.__func__
++            else:
++                value = attrgetter(subject, name)
+             if ismock(value):
+                 value = undecorate(value)
+ 
+diff --git a/sphinx/util/inspect.py b/sphinx/util/inspect.py
+index 23dd9e930..874436703 100644
+--- a/sphinx/util/inspect.py
++++ b/sphinx/util/inspect.py
+@@ -393,6 +393,12 @@ def isproperty(obj: Any) -> bool:
+     return isinstance(obj, property)
+ 
+ 
++def isclassmethodproperty(obj: Any) -> bool:
++    """Check if the object is a classmethod wrapping a property."""
++    return (isinstance(obj, classmethod) and
++            isinstance(safe_getattr(obj, '__func__', None), property))
++
++
+ def isgenericalias(obj: Any) -> bool:
+     """Check if the object is GenericAlias."""
+     if (hasattr(typing, '_GenericAlias') and  # only for py37+

@@ -51,3 +51,60 @@ def test_coding_loop_write_lands_in_workspace(scripted, tmp_path):
     assert result["plan"] == ["write src/hello.py"]
     assert (tmp_path / "src" / "hello.py").read_text() == "x = 1\n"
     assert any(m.type == "tool" and "Wrote" in m.content for m in result["messages"])
+
+
+def test_llm_call_cap_stops_the_loop(scripted):
+    llm = scripted(
+        [
+            {"plan": ["keep calling tools"]},
+            AIMessage(
+                content="",
+                tool_calls=[tool_call("code_exec_tool", {"code": "print(1)"})],
+            ),
+        ]
+    )
+    result = build_loop_graph(llm=llm, tools=[code_exec_tool], max_llm_calls=3).invoke(
+        {"messages": [HumanMessage(content="loop")], "llm_calls": 0}
+    )
+    assert result["llm_calls"] == 3
+
+
+def test_agent_graph_close_is_idempotent(scripted):
+    llm = scripted(
+        [
+            {"plan": ["done"]},
+            AIMessage(content="ok"),
+        ]
+    )
+    graph = build_loop_graph(llm=llm, tools=[code_exec_tool])
+    graph.invoke({"messages": [HumanMessage(content="hi")], "llm_calls": 0})
+    graph.close()
+    graph.close()
+
+
+def test_review_prompt_adds_one_self_review_turn(scripted):
+    llm = scripted(
+        [
+            {"plan": ["answer"]},
+            AIMessage(content="first answer"),
+            AIMessage(content="", tool_calls=[tool_call("code_exec_tool", {"code": "1"})]),
+            AIMessage(content="reviewed answer"),
+        ]
+    )
+    result = build_loop_graph(
+        llm=llm, tools=[code_exec_tool], review_prompt="Check your work."
+    ).invoke({"messages": [HumanMessage(content="hi")], "llm_calls": 0})
+
+    humans = [m.content for m in result["messages"] if m.type == "human"]
+    assert humans == ["hi", "Check your work."]
+    assert result["reviewed"] is True
+    assert result["messages"][-1].content == "reviewed answer"
+
+
+def test_no_review_prompt_ends_on_first_stop(scripted):
+    llm = scripted([{"plan": ["answer"]}, AIMessage(content="done")])
+    result = build_loop_graph(llm=llm, tools=[code_exec_tool]).invoke(
+        {"messages": [HumanMessage(content="hi")], "llm_calls": 0}
+    )
+    assert result["messages"][-1].content == "done"
+    assert not result.get("reviewed")

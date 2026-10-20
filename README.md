@@ -50,6 +50,13 @@ This harness focuses on the building blocks that show up in real coding agents:
 │   ├── day05_context.py
 │   ├── day07_memory.py
 │   └── day09_routing.py
+├── evals/
+│   ├── runner.py          # custom 18-task eval on the toy repo
+│   ├── swebench.py        # run the agent on SWE-bench Verified Mini
+│   ├── grade.py           # grade predictions (swebench harness + dep pins)
+│   ├── fix_modal_eval.py  # patch swebench 4.1.0 for Modal's current API
+│   ├── tasks/
+│   └── results/           # append-only run outputs
 ├── notes/
 │   ├── langgraph-api.md
 │   └── readings/
@@ -161,7 +168,7 @@ The project reads defaults from `src/harness/config.py` and allows overrides thr
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `HARNESS_MODEL` | `openai:gpt-5.6-luna` | Default model for ordinary calls |
+| `HARNESS_MODEL` | `openai:gpt-6-luna` | Default model for ordinary calls |
 | `HARNESS_ROUTING_MODEL` | `openai:gpt-4o-mini` | Model used by routing logic |
 | `HARNESS_TEMPERATURE` | `0` | Default generation temperature |
 | `HARNESS_REASONING_EFFORT` | `none` | Reasoning effort used by gpt-5 models |
@@ -178,6 +185,23 @@ uv run ruff check src examples tests
 ```
 
 These are intentionally offline-friendly tests for the harness logic; they do not require a live API key for the common validation pass.
+
+### SWE-bench Verified Mini
+
+Needs Docker running and an `OPENAI_API_KEY`. Each instance runs inside its
+official `swebench/sweb.eval.x86_64.*` image (pulled as `linux/amd64`, so it
+works on Apple silicon via Rosetta), so the agent can run the repo's real tests.
+
+```bash
+uv run python -m evals.swebench --phase 1 --workers 3
+uv run python -m evals.grade --dataset_name MariusHobbhahn/swe-bench-verified-mini \
+  --split test --predictions_path evals/results/<run>/predictions.jsonl \
+  --max_workers 4 --run_id <id> --report_dir evals/results/<run>
+```
+
+`evals.grade` takes the same flags as `swebench.harness.run_evaluation`. For a
+local run, pull the images first (the agent run does this); add `--modal true`
+to grade on Modal instead. `--predictions_path gold` checks the environment itself.
 
 ## Notes and docs
 

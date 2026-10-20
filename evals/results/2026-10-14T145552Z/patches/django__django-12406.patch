@@ -1,0 +1,86 @@
+diff --git a/django/forms/models.py b/django/forms/models.py
+index dafc11f995..2e68813b4a 100644
+--- a/django/forms/models.py
++++ b/django/forms/models.py
+@@ -13,7 +13,7 @@ from django.forms.forms import BaseForm, DeclarativeFieldsMetaclass
+ from django.forms.formsets import BaseFormSet, formset_factory
+ from django.forms.utils import ErrorList
+ from django.forms.widgets import (
+-    HiddenInput, MultipleHiddenInput, SelectMultiple,
++    HiddenInput, MultipleHiddenInput, RadioSelect, SelectMultiple,
+ )
+ from django.utils.text import capfirst, get_text_list
+ from django.utils.translation import gettext, gettext_lazy as _
+@@ -1185,7 +1185,7 @@ class ModelChoiceField(ChoiceField):
+                  required=True, widget=None, label=None, initial=None,
+                  help_text='', to_field_name=None, limit_choices_to=None,
+                  **kwargs):
+-        if required and (initial is not None):
++        if required and initial is not None:
+             self.empty_label = None
+         else:
+             self.empty_label = empty_label
+@@ -1196,6 +1196,8 @@ class ModelChoiceField(ChoiceField):
+             self, required=required, widget=widget, label=label,
+             initial=initial, help_text=help_text, **kwargs
+         )
++        if required and isinstance(self.widget, RadioSelect):
++            self.empty_label = None
+         self.queryset = queryset
+         self.limit_choices_to = limit_choices_to   # limit the queryset later.
+         self.to_field_name = to_field_name
+diff --git a/tests/model_forms/test_modelchoicefield.py b/tests/model_forms/test_modelchoicefield.py
+index 4a2ef30b90..aa5751a9ad 100644
+--- a/tests/model_forms/test_modelchoicefield.py
++++ b/tests/model_forms/test_modelchoicefield.py
+@@ -63,6 +63,20 @@ class ModelChoiceFieldTests(TestCase):
+         with self.assertRaisesMessage(ValidationError, msg):
+             f.clean(Book.objects.create())
+ 
++    def test_choices_radio_blank(self):
++        field = forms.ModelChoiceField(
++            Category.objects.all(), widget=forms.RadioSelect,
++        )
++        self.assertEqual(list(field.choices), [
++            (self.c1.pk, 'Entertainment'),
++            (self.c2.pk, 'A test'),
++            (self.c3.pk, 'Third'),
++        ])
++        optional_field = forms.ModelChoiceField(
++            Category.objects.all(), widget=forms.RadioSelect, required=False,
++        )
++        self.assertEqual(list(optional_field.choices)[0], ('', '---------'))
++
+     def test_clean_to_field_name(self):
+         f = forms.ModelChoiceField(Category.objects.all(), to_field_name='slug')
+         self.assertEqual(f.clean(self.c1.slug), self.c1)
+diff --git a/tests/model_forms/tests.py b/tests/model_forms/tests.py
+index 8259b3b8bd..d67fa5545a 100644
+--- a/tests/model_forms/tests.py
++++ b/tests/model_forms/tests.py
+@@ -236,6 +236,25 @@ class ModelFormBaseTest(TestCase):
+         obj = f2.save()
+         self.assertEqual(obj.character, char)
+ 
++    def test_non_blank_foreign_key_with_radio(self):
++        class AwardForm(forms.ModelForm):
++            class Meta:
++                model = Award
++                fields = ['character']
++                widgets = {'character': forms.RadioSelect}
++
++        character = Character.objects.create(
++            username='user', last_action=datetime.datetime.today(),
++        )
++        form = AwardForm()
++        self.assertHTMLEqual(
++            str(form['character']),
++            '<ul><li><label for="id_character_0">'
++            '<input id="id_character_0" name="character" type="radio" value="%s"> '
++            '%s</label></li></ul>' % (character.pk, character),
++        )
++        self.assertNotIn('checked', str(form['character']))
++
+     def test_blank_false_with_null_true_foreign_key_field(self):
+         """
+         A ModelForm with a model having ForeignKey(blank=False, null=True)

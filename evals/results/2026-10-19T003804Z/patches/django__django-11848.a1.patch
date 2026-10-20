@@ -1,0 +1,25 @@
+diff --git a/django/utils/http.py b/django/utils/http.py
+index 572cfb4347..b758334416 100755
+--- a/django/utils/http.py
++++ b/django/utils/http.py
+@@ -170,13 +170,19 @@ def parse_http_date(date):
+     for regex in RFC1123_DATE, RFC850_DATE, ASCTIME_DATE:
+         m = regex.match(date)
+         if m is not None:
++            date_format = regex
+             break
+     else:
+         raise ValueError("%r is not in a valid HTTP date format" % date)
+     try:
+         year = int(m.group('year'))
+         if year < 100:
+-            if year < 70:
++            if date_format is RFC850_DATE:
++                current_year = datetime.datetime.utcnow().year
++                year += current_year // 100 * 100
++                if year > current_year + 50:
++                    year -= 100
++            elif year < 70:
+                 year += 2000
+             else:
+                 year += 1900

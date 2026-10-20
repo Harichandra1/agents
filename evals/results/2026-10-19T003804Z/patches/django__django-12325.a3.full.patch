@@ -1,0 +1,96 @@
+diff --git a/django/db/models/base.py b/django/db/models/base.py
+index 8ea6c05ef9..43a7498054 100644
+--- a/django/db/models/base.py
++++ b/django/db/models/base.py
+@@ -202,9 +202,20 @@ class ModelBase(type):
+                 continue
+             # Locate OneToOneField instances.
+             for field in base._meta.local_fields:
+-                if isinstance(field, OneToOneField):
+-                    related = resolve_relation(new_class, field.remote_field.model)
+-                    parent_links[make_model_tuple(related)] = field
++                if not isinstance(field, OneToOneField):
++                    continue
++                if not field.remote_field.parent_link and not field.primary_key:
++                    continue
++                related = resolve_relation(new_class, field.remote_field.model)
++                related_key = make_model_tuple(related)
++                if field.remote_field.parent_link:
++                    # An explicitly marked parent link takes precedence over
++                    # a primary-key OneToOneField to the same model.
++                    parent_links[related_key] = field
++                else:
++                    # Primary-key OneToOneFields in migration state may
++                    # represent a parent link even without parent_link=True.
++                    parent_links.setdefault(related_key, field)
+ 
+         # Track fields inherited from base models.
+         inherited_attributes = set()
+diff --git a/tests/invalid_models_tests/test_models.py b/tests/invalid_models_tests/test_models.py
+index 60b89b6f2e..5f580f9c82 100644
+--- a/tests/invalid_models_tests/test_models.py
++++ b/tests/invalid_models_tests/test_models.py
+@@ -3,7 +3,6 @@ import unittest
+ from django.conf import settings
+ from django.core.checks import Error, Warning
+ from django.core.checks.model_checks import _check_lazy_references
+-from django.core.exceptions import ImproperlyConfigured
+ from django.db import connection, connections, models
+ from django.db.models.functions import Lower
+ from django.db.models.signals import post_init
+@@ -1006,14 +1005,48 @@ class OtherModelTests(SimpleTestCase):
+ 
+         self.assertEqual(ShippingMethod.check(), [])
+ 
+-    def test_missing_parent_link(self):
+-        msg = 'Add parent_link=True to invalid_models_tests.ParkingLot.parent.'
+-        with self.assertRaisesMessage(ImproperlyConfigured, msg):
+-            class Place(models.Model):
+-                pass
++    def test_onetoone_with_parent_model(self):
++        class Document(models.Model):
++            pass
++
++        class Picking(Document):
++            some_unrelated_document = models.OneToOneField(
++                Document, related_name='something', on_delete=models.PROTECT,
++            )
++
++        parent_link = Picking._meta.parents[Document]
++        self.assertEqual(parent_link.name, 'document_ptr')
++        self.assertTrue(parent_link.remote_field.parent_link)
++        self.assertTrue(parent_link.primary_key)
++        self.assertFalse(Picking._meta.get_field('some_unrelated_document').remote_field.parent_link)
++        self.assertEqual(Picking(pk=1).document_ptr_id, 1)
++
++    def test_parent_link_takes_precedence_over_other_onetoone_fields(self):
++        class Document(models.Model):
++            pass
++
++        class Picking(Document):
++            document_ptr = models.OneToOneField(
++                Document, on_delete=models.CASCADE, parent_link=True, related_name='+',
++            )
++            origin = models.OneToOneField(
++                Document, related_name='picking', on_delete=models.PROTECT,
++            )
++
++        self.assertEqual(Picking._meta.parents[Document].name, 'document_ptr')
++
++        class OtherDocument(models.Model):
++            pass
++
++        class OtherPicking(OtherDocument):
++            origin = models.OneToOneField(
++                OtherDocument, related_name='+', on_delete=models.PROTECT,
++            )
++            document_ptr = models.OneToOneField(
++                OtherDocument, on_delete=models.CASCADE, parent_link=True, related_name='+',
++            )
+ 
+-            class ParkingLot(Place):
+-                parent = models.OneToOneField(Place, models.CASCADE)
++        self.assertEqual(OtherPicking._meta.parents[OtherDocument].name, 'document_ptr')
+ 
+     def test_m2m_table_name_clash(self):
+         class Foo(models.Model):

@@ -1,0 +1,38 @@
+diff --git a/sphinx/pycode/ast.py b/sphinx/pycode/ast.py
+index 9bafff11c..833e707d8 100644
+--- a/sphinx/pycode/ast.py
++++ b/sphinx/pycode/ast.py
+@@ -85,12 +85,31 @@ class _UnparseVisitor(ast.NodeVisitor):
+         """Unparse a single argument to a string."""
+         name = self.visit(arg)
+         if default:
++            if isinstance(default, ast.Tuple):
++                default_value = self._visit_tuple_default(default)
++            else:
++                default_value = self.visit(default)
+             if arg.annotation:
+-                name += " = %s" % self.visit(default)
++                name += " = %s" % default_value
+             else:
+-                name += "=%s" % self.visit(default)
++                name += "=%s" % default_value
+         return name
+ 
++    def _visit_tuple_default(self, node: ast.Tuple) -> str:
++        """Unparse a tuple used as an argument default."""
++        if not node.elts:
++            return "()"
++
++        elements = []
++        for element in node.elts:
++            if isinstance(element, ast.Tuple):
++                elements.append(self._visit_tuple_default(element))
++            else:
++                elements.append(self.visit(element))
++        if len(elements) == 1:
++            elements[0] += ","
++        return "(%s)" % ", ".join(elements)
++
+     def visit_arguments(self, node: ast.arguments) -> str:
+         defaults = list(node.defaults)
+         positionals = len(node.args)

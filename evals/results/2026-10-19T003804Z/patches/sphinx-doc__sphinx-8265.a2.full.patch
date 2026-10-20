@@ -1,0 +1,70 @@
+diff --git a/sphinx/pycode/ast.py b/sphinx/pycode/ast.py
+index 9bafff11c..4df71d60c 100644
+--- a/sphinx/pycode/ast.py
++++ b/sphinx/pycode/ast.py
+@@ -151,6 +151,8 @@ class _UnparseVisitor(ast.NodeVisitor):
+         return "{" + ", ".join(items) + "}"
+ 
+     def visit_Index(self, node: ast.Index) -> str:
++        if isinstance(node.value, ast.Tuple):
++            return self._visit_tuple_elements(node.value)
+         return self.visit(node.value)
+ 
+     def visit_Lambda(self, node: ast.Lambda) -> str:
+@@ -166,14 +168,27 @@ class _UnparseVisitor(ast.NodeVisitor):
+         return "{" + ", ".join(self.visit(e) for e in node.elts) + "}"
+ 
+     def visit_Subscript(self, node: ast.Subscript) -> str:
+-        return "%s[%s]" % (self.visit(node.value), self.visit(node.slice))
++        if isinstance(node.slice, ast.Tuple):
++            slice_ = self._visit_tuple_elements(node.slice)
++        else:
++            slice_ = self.visit(node.slice)
++        return "%s[%s]" % (self.visit(node.value), slice_)
+ 
+     def visit_UnaryOp(self, node: ast.UnaryOp) -> str:
+         return "%s %s" % (self.visit(node.op), self.visit(node.operand))
+ 
++    def _visit_tuple_elements(self, node: ast.Tuple) -> str:
++        if not node.elts:
++            return "()"
++
++        elements = ", ".join(self.visit(e) for e in node.elts)
++        if len(node.elts) == 1:
++            elements += ","
++        return elements
++
+     def visit_Tuple(self, node: ast.Tuple) -> str:
+         if node.elts:
+-            return ", ".join(self.visit(e) for e in node.elts)
++            return "(" + self._visit_tuple_elements(node) + ")"
+         else:
+             return "()"
+ 
+diff --git a/tests/test_pycode_ast.py b/tests/test_pycode_ast.py
+index 9b12d24d5..483a2833f 100644
+--- a/tests/test_pycode_ast.py
++++ b/tests/test_pycode_ast.py
+@@ -53,7 +53,8 @@ from sphinx.pycode import ast
+     ("+ a", "+ a"),                             # UAdd
+     ("- 1", "- 1"),                             # UnaryOp
+     ("- a", "- a"),                             # USub
+-    ("(1, 2, 3)", "1, 2, 3"),                   # Tuple
++    ("(1, 2, 3)", "(1, 2, 3)"),                 # Tuple
++    ("(1,)", "(1,)"),                           # Tuple (single element)
+     ("()", "()"),                               # Tuple (empty)
+ ])
+ def test_unparse(source, expected):
+@@ -61,6 +62,12 @@ def test_unparse(source, expected):
+     assert ast.unparse(module.body[0].value) == expected
+ 
+ 
++def test_unparse_tuple_default():
++    source = 'def add_lines(self, lines, color=(1, 1, 1), width=5): pass'
++    function = ast.parse(source).body[0]
++    assert ast.unparse(function.args) == 'self, lines, color=(1, 1, 1), width=5'
++
++
+ def test_unparse_None():
+     assert ast.unparse(None) is None
+ 

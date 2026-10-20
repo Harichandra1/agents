@@ -1,0 +1,31 @@
+diff --git a/sphinx/pycode/ast.py b/sphinx/pycode/ast.py
+index 9bafff11c..27dcf561e 100644
+--- a/sphinx/pycode/ast.py
++++ b/sphinx/pycode/ast.py
+@@ -166,14 +166,24 @@ class _UnparseVisitor(ast.NodeVisitor):
+         return "{" + ", ".join(self.visit(e) for e in node.elts) + "}"
+ 
+     def visit_Subscript(self, node: ast.Subscript) -> str:
+-        return "%s[%s]" % (self.visit(node.value), self.visit(node.slice))
++        if isinstance(node.slice, ast.Tuple) and node.slice.elts:
++            items = [self.visit(elem) for elem in node.slice.elts]
++            if len(items) == 1:
++                items[0] += ","
++            slice_ = ", ".join(items)
++        else:
++            slice_ = self.visit(node.slice)
++        return "%s[%s]" % (self.visit(node.value), slice_)
+ 
+     def visit_UnaryOp(self, node: ast.UnaryOp) -> str:
+         return "%s %s" % (self.visit(node.op), self.visit(node.operand))
+ 
+     def visit_Tuple(self, node: ast.Tuple) -> str:
+         if node.elts:
+-            return ", ".join(self.visit(e) for e in node.elts)
++            items = [self.visit(e) for e in node.elts]
++            if len(items) == 1:
++                items[0] += ","
++            return "(" + ", ".join(items) + ")"
+         else:
+             return "()"
+ 

@@ -1,0 +1,35 @@
+diff --git a/sphinx/directives/other.py b/sphinx/directives/other.py
+index 19f7c0a8d..6d96df2bd 100644
+--- a/sphinx/directives/other.py
++++ b/sphinx/directives/other.py
+@@ -376,7 +376,29 @@ class Include(BaseInclude, SphinxDirective):
+         rel_filename, filename = self.env.relfn2path(self.arguments[0])
+         self.arguments[0] = filename
+         self.env.note_included(filename)
+-        return super().run()
++
++        # The docutils include directive inserts the included file's contents
++        # directly into the current state machine.  Run the source-read event
++        # on those contents before they are parsed, just as we do for the
++        # document source in SphinxStandaloneReader.read_source().
++        state_machine = self.state_machine
++        insert_input = state_machine.insert_input
++
++        def insert_input_with_source_read(
++            input_lines: list[str], source: str | None = None,
++        ) -> None:
++            included_source = '\n'.join(input_lines)
++            content = [included_source]
++            docname = self.env.path2doc(source or filename) or self.env.docname
++            self.env.events.emit('source-read', docname, content)
++            input_lines = content[0].splitlines()
++            insert_input(input_lines, source)
++
++        state_machine.insert_input = insert_input_with_source_read
++        try:
++            return super().run()
++        finally:
++            state_machine.insert_input = insert_input
+ 
+ 
+ def setup(app: Sphinx) -> dict[str, Any]:

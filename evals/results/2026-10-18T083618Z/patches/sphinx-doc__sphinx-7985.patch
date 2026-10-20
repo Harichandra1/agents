@@ -1,0 +1,149 @@
+diff --git a/CHANGES b/CHANGES
+index bc932a7d4..db62bca7d 100644
+--- a/CHANGES
++++ b/CHANGES
+@@ -16,6 +16,7 @@ Deprecated
+ Features added
+ --------------
+ 
++* #7985: linkcheck: Add :confval:`linkcheck_check_local` to check local links.
+ * #2076: autodoc: Allow overriding of exclude-members in skip-member function
+ * #7849: html: Add :confval:`html_codeblock_linenos_style` to change the style
+   of line numbers for code-blocks
+diff --git a/doc/usage/configuration.rst b/doc/usage/configuration.rst
+index eba6904c4..7e71e2cb7 100644
+--- a/doc/usage/configuration.rst
++++ b/doc/usage/configuration.rst
+@@ -2400,6 +2400,15 @@ Options for the linkcheck builder
+ 
+    .. versionadded:: 1.1
+ 
++.. confval:: linkcheck_check_local
++
++   If true, check the existence of relative local links against files in the
++   source directory. Links to files outside the source directory and absolute
++   paths are not checked, as their availability depends on the deployment
++   environment. This option is disabled by default.
++
++   .. versionadded:: 3.2
++
+ .. confval:: linkcheck_request_headers
+ 
+    A dictionary that maps baseurls to HTTP request headers.
+diff --git a/sphinx/builders/linkcheck.py b/sphinx/builders/linkcheck.py
+index dd5317087..3b1d93c02 100644
+--- a/sphinx/builders/linkcheck.py
++++ b/sphinx/builders/linkcheck.py
+@@ -109,6 +109,81 @@ class CheckExternalLinksBuilder(Builder):
+             thread.start()
+             self.workers.append(thread)
+ 
++    def check_local_uri(self, uri: str, docname: str) -> Tuple[str, str, int]:
++        """Check a relative local URI against files in the source directory."""
++        try:
++            uri.encode('utf-8')
++        except UnicodeEncodeError:
++            return 'local', '', 0
++
++        parsed = urlparse(uri)
++        if parsed.scheme or parsed.netloc or path.isabs(parsed.path):
++            # Absolute paths, file URLs and network-path references depend on
++            # the deployment environment, so they cannot be checked reliably.
++            return 'local', '', 0
++
++        if parsed.path:
++            target = path.realpath(path.join(path.dirname(self.env.doc2path(docname)),
++                                             unquote(parsed.path)))
++        else:
++            target = path.realpath(self.env.doc2path(docname))
++        srcdir = path.realpath(self.srcdir)
++        try:
++            if path.commonpath((srcdir, target)) != srcdir:
++                return 'local', '', 0
++        except ValueError:
++            return 'local', '', 0
++
++        target_docname = self.env.path2doc(target)
++        if not target_docname and target.lower().endswith(('.html', '.htm')):
++            # HTML pages are generated from Sphinx documents and are not
++            # present during a linkcheck build.  Resolve them back to sources.
++            source = path.splitext(target)[0]
++            suffixes = self.env.config.source_suffix
++            if isinstance(suffixes, str):
++                suffixes = [suffixes]
++            elif hasattr(suffixes, 'keys'):
++                suffixes = suffixes.keys()
++            for suffix in suffixes:
++                target_docname = self.env.path2doc(source + suffix)
++                if target_docname:
++                    break
++
++        target_exists = path.exists(target)
++        if target_docname and target_docname in self.env.found_docs:
++            target_exists = True
++        if not target_exists:
++            info = __('Local file not found')
++            self.broken[uri] = info
++            return 'broken', info, 0
++
++        anchor = parsed.fragment
++        if anchor and self.app.config.linkcheck_anchors:
++            if any(rex.match(anchor) for rex in self.anchors_ignore):
++                anchor = ''
++            else:
++                anchor = unquote(anchor)
++            if anchor:
++                if target_docname and target_docname in self.env.found_docs:
++                    doctree = self.env.get_doctree(target_docname)
++                    found = anchor in doctree.ids
++                elif target.lower().endswith(('.html', '.htm')):
++                    parser = AnchorCheckParser(anchor)
++                    with open(target, 'r', encoding='utf-8', errors='replace') as f:
++                        parser.feed(f.read())
++                    parser.close()
++                    found = parser.found
++                else:
++                    # Anchors in arbitrary non-HTML files have no portable
++                    # meaning; check the local file itself only.
++                    found = True
++                if not found:
++                    info = __("Anchor '%s' not found") % anchor
++                    self.broken[uri] = info
++                    return 'broken', info, 0
++
++        return 'local', '', 0
++
+     def check_thread(self) -> None:
+         kwargs = {
+             'allow_redirects': True,
+@@ -210,9 +285,21 @@ class CheckExternalLinksBuilder(Builder):
+ 
+         def check() -> Tuple[str, str, int]:
+             # check for various conditions without bothering the network
+-            if len(uri) == 0 or uri.startswith(('#', 'mailto:', 'ftp:')):
++            if (len(uri) == 0 or uri.startswith(('mailto:', 'ftp:')) or
++                    (uri.startswith('#') and
++                     (not self.app.config.linkcheck_check_local or uri == '#'))):
+                 return 'unchecked', '', 0
+             elif not uri.startswith(('http:', 'https:')):
++                for rex in self.to_ignore:
++                    if rex.match(uri):
++                        return 'ignored', '', 0
++                if self.app.config.linkcheck_check_local:
++                    try:
++                        return self.check_local_uri(uri, docname)
++                    except Exception:
++                        # Invalid local URI or filesystem errors must not abort
++                        # the linkcheck build; retain the existing local status.
++                        return 'local', '', 0
+                 return 'local', '', 0
+             elif uri in self.good:
+                 return 'working', 'old', 0
+@@ -362,6 +449,7 @@ def setup(app: Sphinx) -> Dict[str, Any]:
+     app.add_config_value('linkcheck_timeout', None, None, [int])
+     app.add_config_value('linkcheck_workers', 5, None)
+     app.add_config_value('linkcheck_anchors', True, None)
++    app.add_config_value('linkcheck_check_local', False, None)
+     # Anchors starting with ! are ignored since they are
+     # commonly used for dynamic pages
+     app.add_config_value('linkcheck_anchors_ignore', ["^!"], None)

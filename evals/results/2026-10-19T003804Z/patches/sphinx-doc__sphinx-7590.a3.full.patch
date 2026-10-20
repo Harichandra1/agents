@@ -1,0 +1,25 @@
+diff --git a/sphinx/domains/cpp.py b/sphinx/domains/cpp.py
+index fe52d881d..c08bfe6fe 100644
+--- a/sphinx/domains/cpp.py
++++ b/sphinx/domains/cpp.py
+@@ -298,6 +298,7 @@ T = TypeVar('T')
+ 
+ _string_re = re.compile(r"[LuU8]?('([^'\\]*(?:\\.[^'\\]*)*)'"
+                         r'|"([^"\\]*(?:\\.[^"\\]*)*)")', re.S)
++_user_defined_literal_suffix_re = re.compile(r'[a-zA-Z_][a-zA-Z_0-9]*')
+ _visibility_re = re.compile(r'\b(public|private|protected)\b')
+ _operator_re = re.compile(r'''(?x)
+         \[\s*\]
+@@ -4662,8 +4663,10 @@ class DefinitionParser(BaseParser):
+                       integer_literal_re, octal_literal_re]:
+             pos = self.pos
+             if self.match(regex):
+-                while self.current_char in 'uUlLfF':
+-                    self.pos += 1
++                # A user-defined literal suffix is an identifier, so consume it
++                # as a whole.  This also handles the built-in suffixes (which
++                # consist only of the same characters as before).
++                self.match(_user_defined_literal_suffix_re)
+                 return ASTNumberLiteral(self.definition[pos:self.pos])
+ 
+         string = self._parse_string()

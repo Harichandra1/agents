@@ -1,0 +1,148 @@
+diff --git a/sphinx/builders/linkcheck.py b/sphinx/builders/linkcheck.py
+index dd5317087..47e981915 100644
+--- a/sphinx/builders/linkcheck.py
++++ b/sphinx/builders/linkcheck.py
+@@ -9,13 +9,14 @@
+ """
+ 
+ import json
++import posixpath
+ import queue
+ import re
+ import socket
+ import threading
+ from html.parser import HTMLParser
+ from os import path
+-from typing import Any, Dict, List, Set, Tuple
++from typing import Any, Dict, List, Optional, Set, Tuple
+ from urllib.parse import unquote, urlparse
+ 
+ from docutils import nodes
+@@ -208,12 +209,106 @@ class CheckExternalLinksBuilder(Builder):
+                 else:
+                     return 'redirected', new_url, 0
+ 
+-        def check() -> Tuple[str, str, int]:
++        def check_local_uri(uri: str, docname: str) -> Tuple[str, str, int]:
++            try:
++                parsed = urlparse(uri)
++            except ValueError:
++                # Keep unusual, unparseable local URIs at the old unchecked
++                # status rather than failing the whole linkcheck build.
++                return 'local', '', 0
++
++            # Absolute URLs and paths cannot be checked reliably: they may
++            # point to files installed by a deployment script, or paths
++            # whose location depends on the web server configuration.
++            if parsed.scheme or parsed.netloc or parsed.path.startswith('/'):
++                return 'local', '', 0
++
++            # linkcheck_anchors_ignore applies to local anchors as well as
++            # anchors in remote documents.
++            anchor = parsed.fragment
++            if anchor:
++                for rex in self.anchors_ignore:
++                    if rex.match(anchor):
++                        anchor = None
++                        break
++
++            url_path = unquote(parsed.path)
++            if url_path.startswith('/'):
++                return 'local', '', 0
++            if url_path:
++                relative_path = posixpath.normpath(
++                    posixpath.join(posixpath.dirname(docname), url_path))
++            else:
++                relative_path = docname
++            if relative_path == '..' or relative_path.startswith('../'):
++                return 'local', '', 0
++
++            def find_docname(candidate: str, is_directory: bool = False) -> Optional[str]:
++                if is_directory:
++                    candidates = [posixpath.normpath(
++                        posixpath.join(candidate.rstrip('/'), 'index'))]
++                else:
++                    candidates = [candidate]
++                suffixes = [self.config.html_link_suffix,
++                            self.config.html_file_suffix, '.html']
++                for suffix in suffixes:
++                    if suffix and candidate.endswith(suffix):
++                        candidates.append(candidate[:-len(suffix)])
++                for name in candidates:
++                    name = name.rstrip('/')
++                    if name in self.env.found_docs:
++                        return name
++                return None
++
++            # The linkcheck builder's target URIs are document names (without
++            # a suffix), so check those before interpreting a URI as a path
++            # relative to the current document.  The latter also handles
++            # ordinary links such as ``other.html`` and static files.
++            target_docname = url_path if url_path in self.env.found_docs else None
++            if target_docname is None:
++                is_directory = url_path.endswith('/') or url_path in ('.', '..')
++                target_docname = find_docname(relative_path, is_directory)
++
++            filename = None
++            if target_docname is None:
++                filename = path.join(self.srcdir, *relative_path.split('/'))
++                if not path.isfile(filename):
++                    return 'broken', __('Local file not found'), 0
++
++            if anchor and self.app.config.linkcheck_anchors:
++                anchor = unquote(anchor)
++                if target_docname:
++                    doctree = self.env.get_doctree(target_docname)
++                    found = any(anchor in node.get('ids', ()) or
++                                anchor in node.get('names', ())
++                                for node in doctree.traverse(nodes.Element))
++                elif filename and filename.lower().endswith('.html'):
++                    parser = AnchorCheckParser(anchor)
++                    with open(filename, encoding='utf-8', errors='replace') as html:
++                        for chunk in iter(lambda: html.read(4096), ''):
++                            parser.feed(chunk)
++                            if parser.found:
++                                break
++                    parser.close()
++                    found = parser.found
++                else:
++                    # Anchor checking is meaningful for HTML documents only.
++                    found = True
++
++                if not found:
++                    return 'broken', __("Anchor '%s' not found") % anchor, 0
++
++            return 'working', '', 0
++
++        def check(uri: str, docname: str) -> Tuple[str, str, int]:
+             # check for various conditions without bothering the network
+-            if len(uri) == 0 or uri.startswith(('#', 'mailto:', 'ftp:')):
++            if len(uri) == 0 or uri.startswith(('mailto:', 'ftp:')):
+                 return 'unchecked', '', 0
+             elif not uri.startswith(('http:', 'https:')):
+-                return 'local', '', 0
++                for rex in self.to_ignore:
++                    if rex.match(uri):
++                        return 'ignored', '', 0
++                return check_local_uri(uri, docname)
+             elif uri in self.good:
+                 return 'working', 'old', 0
+             elif uri in self.broken:
+@@ -243,7 +338,7 @@ class CheckExternalLinksBuilder(Builder):
+             uri, docname, lineno = self.wqueue.get()
+             if uri is None:
+                 break
+-            status, info, code = check()
++            status, info, code = check(uri, docname)
+             self.rqueue.put((uri, docname, lineno, status, info, code))
+ 
+     def process_result(self, result: Tuple[str, str, int, str, str, int]) -> None:
+@@ -261,6 +356,8 @@ class CheckExternalLinksBuilder(Builder):
+             return
+         if lineno:
+             logger.info('(line %4d) ', lineno, nonl=True)
++        if status == 'broken':
++            self.app.statuscode = 1
+         if status == 'ignored':
+             if info:
+                 logger.info(darkgray('-ignored- ') + uri + ': ' + info)

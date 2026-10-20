@@ -1,0 +1,89 @@
+diff --git a/django/db/models/deletion.py b/django/db/models/deletion.py
+index ae82d26340..62f15e3e23 100644
+--- a/django/db/models/deletion.py
++++ b/django/db/models/deletion.py
+@@ -4,6 +4,7 @@ from operator import attrgetter
+ 
+ from django.db import IntegrityError, connections, transaction
+ from django.db.models import signals, sql
++from django.db.models.sql.where import OR
+ 
+ 
+ class ProtectedError(IntegrityError):
+@@ -310,7 +311,17 @@ class Collector:
+                     )
+ 
+             # fast deletes
++            fast_deletes = {}
+             for qs in self.fast_deletes:
++                model = qs.model._meta.concrete_model
++                if model in fast_deletes:
++                    combined_qs = fast_deletes[model]
++                    query = qs.query.clone()
++                    query.model = combined_qs.model
++                    combined_qs.query.combine(query, OR)
++                else:
++                    fast_deletes[model] = qs._chain()
++            for qs in fast_deletes.values():
+                 count = qs._raw_delete(using=self.using)
+                 deleted_counter[qs.model._meta.label] += count
+ 
+diff --git a/tests/delete/models.py b/tests/delete/models.py
+index e2ddce0588..5636c13625 100644
+--- a/tests/delete/models.py
++++ b/tests/delete/models.py
+@@ -100,6 +100,15 @@ class User(models.Model):
+     avatar = models.ForeignKey(Avatar, models.CASCADE, null=True)
+ 
+ 
++class Entry(models.Model):
++    created_by = models.ForeignKey(User, models.CASCADE, related_name='created_entries')
++    updated_by = models.ForeignKey(User, models.CASCADE, related_name='updated_entries')
++
++
++class Person(models.Model):
++    friends = models.ManyToManyField('self')
++
++
+ class HiddenUser(models.Model):
+     r = models.ForeignKey(R, models.CASCADE, related_name="+")
+ 
+diff --git a/tests/delete/tests.py b/tests/delete/tests.py
+index 505fd843d7..c7add746d4 100644
+--- a/tests/delete/tests.py
++++ b/tests/delete/tests.py
+@@ -6,9 +6,9 @@ from django.db.models.sql.constants import GET_ITERATOR_CHUNK_SIZE
+ from django.test import TestCase, skipIfDBFeature, skipUnlessDBFeature
+ 
+ from .models import (
+-    MR, A, Avatar, Base, Child, HiddenUser, HiddenUserProfile, M, M2MFrom,
+-    M2MTo, MRNull, Origin, Parent, R, RChild, RChildChild, Referrer, S, T,
+-    User, create_a, get_default_r,
++    MR, A, Avatar, Base, Child, Entry, HiddenUser, HiddenUserProfile, M,
++    M2MFrom, M2MTo, MRNull, Origin, Parent, Person, R, RChild, RChildChild,
++    Referrer, S, T, User, create_a, get_default_r,
+ )
+ 
+ 
+@@ -509,6 +509,21 @@ class FastDeleteTests(TestCase):
+         # 1 to delete f, 1 to fast-delete m2m for f
+         self.assertNumQueries(2, f.delete)
+ 
++    def test_fast_delete_combined_relationships(self):
++        person = Person.objects.create()
++        friend = Person.objects.create()
++        person.friends.add(friend)
++        with self.assertNumQueries(2):
++            person.delete()
++        self.assertFalse(Person.objects.exists())
++
++        user = User.objects.create()
++        Entry.objects.create(created_by=user, updated_by=user)
++        with self.assertNumQueries(2):
++            user.delete()
++        self.assertFalse(Entry.objects.exists())
++        self.assertFalse(User.objects.exists())
++
+     def test_fast_delete_revm2m(self):
+         t = M2MTo.objects.create()
+         f = M2MFrom.objects.create()

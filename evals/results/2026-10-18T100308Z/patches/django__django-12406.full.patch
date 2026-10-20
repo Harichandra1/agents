@@ -1,0 +1,91 @@
+diff --git a/django/db/models/fields/related.py b/django/db/models/fields/related.py
+index f269d9e17f..d1cfc8a025 100644
+--- a/django/db/models/fields/related.py
++++ b/django/db/models/fields/related.py
+@@ -975,6 +975,12 @@ class ForeignKey(ForeignObject):
+             raise ValueError("Cannot create form field for %r yet, because "
+                              "its related model %r has not been loaded yet" %
+                              (self.name, self.remote_field.model))
++        widget = kwargs.get('widget')
++        if (
++            isinstance(widget, forms.RadioSelect) or
++            (isinstance(widget, type) and issubclass(widget, forms.RadioSelect))
++        ) and not self.blank:
++            kwargs.setdefault('empty_label', None)
+         return super().formfield(**{
+             'form_class': forms.ModelChoiceField,
+             'queryset': self.remote_field.model._default_manager.using(using),
+diff --git a/tests/model_forms/test_modelchoicefield.py b/tests/model_forms/test_modelchoicefield.py
+index 4a2ef30b90..4effa1b5b1 100644
+--- a/tests/model_forms/test_modelchoicefield.py
++++ b/tests/model_forms/test_modelchoicefield.py
+@@ -128,6 +128,12 @@ class ModelChoiceFieldTests(TestCase):
+             (c4.pk, 'Fourth'),
+         ])
+ 
++    def test_choices_radio_blank(self):
++        field = forms.ModelChoiceField(
++            Category.objects.all(), widget=forms.RadioSelect,
++        )
++        self.assertEqual(list(field.choices)[0], ('', '---------'))
++
+     def test_choices_bool(self):
+         f = forms.ModelChoiceField(Category.objects.all(), empty_label=None)
+         self.assertIs(bool(f.choices), True)
+diff --git a/tests/model_forms/tests.py b/tests/model_forms/tests.py
+index 8259b3b8bd..e21cf6fc0d 100644
+--- a/tests/model_forms/tests.py
++++ b/tests/model_forms/tests.py
+@@ -209,6 +209,52 @@ class ModelFormBaseTest(TestCase):
+         instance = construct_instance(form, Person(), fields=())
+         self.assertEqual(instance.name, '')
+ 
++    def test_non_blank_foreign_key_with_radio(self):
++        character = Character.objects.create(
++            username='user', last_action=datetime.datetime.today(),
++        )
++        form_class = modelform_factory(
++            Award,
++            fields=['character'],
++            widgets={'character': forms.RadioSelect()},
++        )
++        form = form_class()
++        self.assertEqual(list(form.fields['character'].choices), [
++            (character.pk, str(character)),
++        ])
++        rendered = str(form['character'])
++        self.assertNotIn('value=""', rendered)
++        self.assertNotIn('checked', rendered)
++
++        award = Award.objects.create(name='Best tester', character=character)
++        self.assertIn('checked', str(form_class(instance=award)['character']))
++
++        class RadioSelectSubclass(forms.RadioSelect):
++            pass
++
++        for widget in (forms.RadioSelect, RadioSelectSubclass, RadioSelectSubclass()):
++            field = modelform_factory(
++                Award, fields=['character'], widgets={'character': widget},
++            ).base_fields['character']
++            self.assertIsNone(field.empty_label)
++
++        # An explicit empty_label continues to override the model default.
++        field = Award._meta.get_field('character').formfield(
++            widget=forms.RadioSelect(), empty_label='Choose a character',
++        )
++        self.assertEqual(field.empty_label, 'Choose a character')
++
++        # A regular select keeps its blank option, and a blank=True foreign
++        # key still has one with RadioSelect.
++        select_form = modelform_factory(Award, fields=['character'])()
++        self.assertEqual(list(select_form.fields['character'].choices)[0], ('', '---------'))
++        radio_form = modelform_factory(
++            Author,
++            fields=['publication'],
++            widgets={'publication': forms.RadioSelect},
++        )()
++        self.assertEqual(list(radio_form.fields['publication'].choices)[0], ('', '---------'))
++
+     def test_blank_with_null_foreign_key_field(self):
+         """
+         #13776 -- ModelForm's with models having a FK set to null=False and

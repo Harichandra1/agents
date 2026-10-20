@@ -21,6 +21,7 @@ Icon?
 Output*.md
 .harness-workspace/
 examples/workspace/
+evals/.cache/
 
 # NOTE: uv.lock is intentionally NOT ignored. This is an application, not a
 # library, so the lock file is committed to keep CI (Day 22) reproducible.
@@ -33,3 +34,10 @@ examples/workspace/
 .env.dev
 .env.prod
 .env.staging
+
+# Day 17 SWE-bench: bulky raw outputs stay local. Predictions, patches,
+# results.jsonl and the graded report JSONs are the committed record.
+logs/
+evals/results/**/trajectories/
+evals/results/*.log
+evals/results/**/*.log

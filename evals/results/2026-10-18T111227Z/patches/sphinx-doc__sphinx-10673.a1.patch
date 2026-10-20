@@ -1,0 +1,70 @@
+diff --git a/sphinx/directives/other.py b/sphinx/directives/other.py
+index 35e16e623..dcb378dd2 100644
+--- a/sphinx/directives/other.py
++++ b/sphinx/directives/other.py
+@@ -85,6 +85,8 @@ class TocTree(SphinxDirective):
+ 
+         ret: List[Node] = []
+         excluded = Matcher(self.config.exclude_patterns)
++        index_pages = self.env.get_domain('std').initial_data['labels']
++        seen_index_pages = set()
+         for entry in self.content:
+             if not entry:
+                 continue
+@@ -118,6 +120,12 @@ class TocTree(SphinxDirective):
+                 docname = docname_join(self.env.docname, docname)
+                 if url_re.match(ref) or ref == 'self':
+                     toctree['entries'].append((title, ref))
++                elif docname not in self.env.found_docs and ref in index_pages:
++                    if ref in seen_index_pages:
++                        logger.warning(__('duplicated entry found in toctree: %s'), ref,
++                                       location=toctree)
++                    seen_index_pages.add(ref)
++                    toctree['entries'].append((title, ref))
+                 elif docname not in self.env.found_docs:
+                     if excluded(self.env.doc2path(docname, False)):
+                         message = __('toctree contains reference to excluded document %r')
+diff --git a/sphinx/environment/adapters/toctree.py b/sphinx/environment/adapters/toctree.py
+index 9678e3c7c..1516f664b 100644
+--- a/sphinx/environment/adapters/toctree.py
++++ b/sphinx/environment/adapters/toctree.py
+@@ -7,7 +7,7 @@ from docutils.nodes import Element, Node
+ 
+ from sphinx import addnodes
+ from sphinx.locale import __
+-from sphinx.util import logging, url_re
++from sphinx.util import docname_join, logging, url_re
+ from sphinx.util.matching import Matcher
+ from sphinx.util.nodes import clean_astext, process_only_nodes
+ 
+@@ -76,6 +76,8 @@ class TocTree:
+         toctree_ancestors = self.get_toctree_ancestors(docname)
+         included = Matcher(self.env.config.include_patterns)
+         excluded = Matcher(self.env.config.exclude_patterns)
++        std_domain = self.env.get_domain('std')
++        index_pages = std_domain.initial_data['labels']
+ 
+         def _toctree_add_classes(node: Element, depth: int) -> None:
+             """Add 'toctree-l%d' and 'current' classes to the toctree."""
+@@ -139,6 +141,21 @@ class TocTree:
+                         item = nodes.list_item('', para)
+                         # don't show subitems
+                         toc = nodes.bullet_list('', item)
++                    elif (ref in index_pages and
++                          docname_join(toctreenode['parent'], ref) not in self.env.found_docs):
++                        # Generated index and search pages are not source
++                        # documents, but can still be included in a toctree.
++                        docname, anchorname, index_title = std_domain.data['labels'][ref]
++                        refdoc = docname
++                        if title is None:
++                            title = index_title
++                        reference = nodes.reference('', '', internal=True,
++                                                    refuri=docname,
++                                                    anchorname=anchorname,
++                                                    *[nodes.Text(title)])
++                        para = addnodes.compact_paragraph('', '', reference)
++                        item = nodes.list_item('', para)
++                        toc = nodes.bullet_list('', item)
+                     else:
+                         if ref in parents:
+                             logger.warning(__('circular toctree references '

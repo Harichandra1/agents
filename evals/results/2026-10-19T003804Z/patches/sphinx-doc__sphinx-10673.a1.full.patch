@@ -1,0 +1,51 @@
+diff --git a/sphinx/directives/other.py b/sphinx/directives/other.py
+index 35e16e623..cbfc3955d 100644
+--- a/sphinx/directives/other.py
++++ b/sphinx/directives/other.py
+@@ -118,6 +118,9 @@ class TocTree(SphinxDirective):
+                 docname = docname_join(self.env.docname, docname)
+                 if url_re.match(ref) or ref == 'self':
+                     toctree['entries'].append((title, ref))
++                elif (docname in ('genindex', 'modindex', 'search') and
++                      docname not in self.env.found_docs):
++                    toctree['entries'].append((title, docname))
+                 elif docname not in self.env.found_docs:
+                     if excluded(self.env.doc2path(docname, False)):
+                         message = __('toctree contains reference to excluded document %r')
+diff --git a/sphinx/environment/adapters/toctree.py b/sphinx/environment/adapters/toctree.py
+index 9678e3c7c..89fc3c814 100644
+--- a/sphinx/environment/adapters/toctree.py
++++ b/sphinx/environment/adapters/toctree.py
+@@ -139,6 +139,32 @@ class TocTree:
+                         item = nodes.list_item('', para)
+                         # don't show subitems
+                         toc = nodes.bullet_list('', item)
++                    elif (ref not in self.env.tocs and
++                          ref in ('genindex', 'modindex', 'search')):
++                        std_domain = cast(Any, self.env.domains['std'])
++                        target, _ = std_domain.anonlabels[ref]
++                        is_generated = (
++                            getattr(builder, 'name', None) != 'singlehtml' and (
++                                ref == 'genindex' and getattr(builder, 'use_index', False) or
++                                ref == 'modindex' and any(
++                                    indexname == target
++                                    for indexname, *_ in
++                                    (getattr(builder, 'domain_indices', None) or ())) or
++                                ref == 'search' and getattr(builder, 'search', False)
++                            )
++                        )
++                        if is_generated:
++                            if not title:
++                                title = std_domain.labels[ref][2]
++                            reference = nodes.reference('', '', internal=True,
++                                                        refuri=target, anchorname='',
++                                                        *[nodes.Text(title)])
++                            para = addnodes.compact_paragraph('', '', reference)
++                            item = nodes.list_item('', para)
++                            toc = nodes.bullet_list('', item)
++                        else:
++                            refdoc = ref
++                            toc = self.env.tocs[ref].deepcopy()
+                     else:
+                         if ref in parents:
+                             logger.warning(__('circular toctree references '

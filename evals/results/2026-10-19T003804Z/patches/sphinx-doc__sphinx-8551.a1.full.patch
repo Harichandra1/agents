@@ -1,0 +1,102 @@
+diff --git a/sphinx/domains/python.py b/sphinx/domains/python.py
+index 79d7e4f46..bd38f320d 100644
+--- a/sphinx/domains/python.py
++++ b/sphinx/domains/python.py
+@@ -263,18 +263,25 @@ def _pseudo_parse_arglist(signode: desc_signature, arglist: str) -> None:
+         signode += paramlist
+ 
+ 
+-# This override allows our inline type specifiers to behave like :class: link
+-# when it comes to handling "." and "~" prefixes.
++# This override makes implicit type-field references behave like :class: links,
++# including their scope and handling of "." and "~" prefixes.
+ class PyXrefMixin:
+     def make_xref(self, rolename: str, domain: str, target: str,
+                   innernode: "Type[TextlikeNode]" = nodes.emphasis,
+                   contnode: Node = None, env: BuildEnvironment = None) -> Node:
+         result = super().make_xref(rolename, domain, target,  # type: ignore
+                                    innernode, contnode, env)
+-        result['refspecific'] = True
++        if rolename == 'class':
++            if env:
++                result['py:module'] = env.ref_context.get('py:module')
++                result['py:class'] = env.ref_context.get('py:class')
++            result.attributes.pop('refspecific', None)
++        else:
++            result['refspecific'] = True
+         if target.startswith(('.', '~')):
+             prefix, result['reftarget'] = target[0], target[1:]
+             if prefix == '.':
++                result['refspecific'] = True
+                 text = target[1:]
+             elif prefix == '~':
+                 text = target.split('.')[-1]
+diff --git a/tests/test_domain_py.py b/tests/test_domain_py.py
+index 2dc97bed9..cd67cd5dd 100644
+--- a/tests/test_domain_py.py
++++ b/tests/test_domain_py.py
+@@ -206,6 +206,64 @@ def test_domain_py_find_obj(app, status, warning):
+               ('roles', 'NestedParentA.NestedChildA.subchild_1', 'method'))])
+ 
+ 
++@pytest.mark.sphinx('dummy', testroot='domain-py')
++def test_info_field_list(app, warning):
++    text = (".. py:class:: mod.A\n"
++            ".. py:class:: mod.submod.A\n"
++            "\n"
++            ".. py:function:: global_function()\n"
++            "\n"
++            "   :param mod.A a:\n"
++            "   :rtype: mod.A\n"
++            "   :raises mod.A: Raised error.\n"
++            "\n"
++            ".. py:currentmodule:: mod\n"
++            ".. py:function:: mod_function()\n"
++            "\n"
++            "   :param A a:\n"
++            "   :rtype: A\n"
++            "\n"
++            ".. py:currentmodule:: mod.submod\n"
++            ".. py:function:: submod_function()\n"
++            "\n"
++            "   :param A a:\n"
++            "   :rtype: A\n"
++            "\n"
++            ".. py:currentmodule:: None\n"
++            ".. py:function:: outside_function()\n"
++            "\n"
++            "   :param A a:\n"
++            "   :rtype: A\n")
++    (app.srcdir / 'index.rst').write_text(text)
++    app.build(force_all=True)
++    assert 'more than one target found' not in warning.getvalue()
++    doctree = app.env.get_doctree('index')
++    all_xrefs = list(doctree.traverse(pending_xref))
++    exception_xrefs = [xref for xref in all_xrefs if xref['reftype'] == 'exc']
++    assert len(exception_xrefs) == 1
++    assert exception_xrefs[0]['reftarget'] == 'mod.A'
++    assert exception_xrefs[0].hasattr('refspecific')
++    assert not exception_xrefs[0].hasattr('py:module')
++
++    xrefs = [xref for xref in all_xrefs if xref['reftype'] == 'class']
++    assert [(xref['reftarget'], xref.get('py:module'), xref.hasattr('refspecific'))
++            for xref in xrefs] == [
++                ('mod.A', None, False), ('mod.A', None, False),
++                ('A', 'mod', False), ('A', 'mod', False),
++                ('A', 'mod.submod', False), ('A', 'mod.submod', False),
++                ('A', None, False), ('A', None, False),
++            ]
++
++    domain = app.env.get_domain('py')
++    resolved = [domain.resolve_xref(app.env, 'index', app.builder, xref['reftype'],
++                                    xref['reftarget'], xref, xref[0])
++                for xref in xrefs]
++    assert [ref['refid'] if ref else None for ref in resolved] == [
++        'mod.A', 'mod.A', 'mod.A', 'mod.A',
++        'mod.submod.A', 'mod.submod.A', None, None,
++    ]
++
++
+ def test_get_full_qualified_name():
+     env = Mock(domaindata={})
+     domain = PythonDomain(env)

@@ -1,0 +1,172 @@
+diff --git a/django/db/models/base.py b/django/db/models/base.py
+index 844c01e95e..afa62e35fc 100644
+--- a/django/db/models/base.py
++++ b/django/db/models/base.py
+@@ -569,6 +569,15 @@ class Model(metaclass=ModelBase):
+         return getattr(self, meta.pk.attname)
+ 
+     def _set_pk_val(self, value):
++        # _meta.parents contains only direct parent links. Include ancestors
++        # when syncing primary keys and clearing links for new instances.
++        models = [self._meta.concrete_model] + self._meta.get_parent_list()
++        for model in models:
++            for parent_link in model._meta.parents.values():
++                if parent_link:
++                    setattr(self, parent_link.target_field.attname, value)
++                    if value is None:
++                        setattr(self, parent_link.attname, None)
+         return setattr(self, self._meta.pk.attname, value)
+ 
+     pk = property(_get_pk_val, _set_pk_val)
+diff --git a/tests/model_inheritance_regress/models.py b/tests/model_inheritance_regress/models.py
+index 5e4c928dc9..63bf643041 100644
+--- a/tests/model_inheritance_regress/models.py
++++ b/tests/model_inheritance_regress/models.py
+@@ -1,4 +1,5 @@
+ import datetime
++import uuid
+ 
+ from django.db import models
+ 
+@@ -80,6 +81,38 @@ class Child(Parent):
+     name = models.CharField(max_length=10)
+ 
+ 
++class PKResetParent(models.Model):
++    uid = models.AutoField(primary_key=True)
++    value = models.BooleanField(default=False)
++
++
++class PKResetChild(PKResetParent):
++    pass
++
++
++class PKResetChildProxy(PKResetChild):
++    class Meta:
++        proxy = True
++
++
++class PKResetUUIDParent(models.Model):
++    uid = models.UUIDField(primary_key=True, default=uuid.uuid4)
++    value = models.BooleanField(default=False)
++
++
++class PKResetUUIDChild(PKResetUUIDParent):
++    pass
++
++
++class PKResetOtherParent(models.Model):
++    other_parent_id = models.AutoField(primary_key=True)
++    other_value = models.BooleanField(default=False)
++
++
++class PKResetMultiChild(PKResetParent, PKResetOtherParent):
++    pass
++
++
+ class SelfRefParent(models.Model):
+     parent_data = models.IntegerField()
+     self_data = models.ForeignKey('self', models.SET_NULL, null=True)
+diff --git a/tests/model_inheritance_regress/tests.py b/tests/model_inheritance_regress/tests.py
+index b0156ff9ac..946ded7ec4 100644
+--- a/tests/model_inheritance_regress/tests.py
++++ b/tests/model_inheritance_regress/tests.py
+@@ -12,12 +12,98 @@ from .models import (
+     ArticleWithAuthor, BachelorParty, BirthdayParty, BusStation, Child,
+     DerivedM, InternalCertificationAudit, ItalianRestaurant, M2MChild,
+     MessyBachelorParty, ParkingLot, ParkingLot3, ParkingLot4A, ParkingLot4B,
++    PKResetChild, PKResetChildProxy, PKResetMultiChild, PKResetOtherParent,
++    PKResetParent, PKResetUUIDChild, PKResetUUIDParent,
+     Person, Place, Profile, QualityControl, Restaurant, SelfRefChild,
+     SelfRefParent, Senator, Supplier, TrainStation, User, Wholesaler,
+ )
+ 
+ 
+ class ModelInheritanceTest(TestCase):
++    def test_create_new_instance_with_pk_equals_none(self):
++        created_child = PKResetChild.objects.create(value=True)
++        original_pk = created_child.pk
++        child = PKResetParent.objects.get(pk=original_pk).pkresetchild
++
++        child.pk = None
++        child.value = False
++        child.save()
++
++        self.assertTrue(PKResetParent.objects.get(pk=original_pk).value)
++        self.assertFalse(PKResetChild.objects.get(pk=child.pk).value)
++        self.assertEqual(PKResetChild.objects.count(), 2)
++
++    def test_create_new_instance_with_pk_equals_none_uuid_parent(self):
++        child = PKResetUUIDChild.objects.create(value=True)
++        original_pk = child.pk
++
++        child.pk = None
++        child.value = False
++        child.save()
++
++        self.assertTrue(PKResetUUIDParent.objects.get(pk=original_pk).value)
++        self.assertFalse(PKResetUUIDChild.objects.get(pk=child.pk).value)
++        self.assertEqual(PKResetUUIDChild.objects.count(), 2)
++
++    def test_create_new_instance_with_pk_equals_none_proxy(self):
++        child = PKResetChildProxy.objects.create(value=True)
++        original_pk = child.pk
++
++        child.pk = None
++        child.value = False
++        child.save()
++
++        self.assertTrue(PKResetParent.objects.get(pk=original_pk).value)
++        self.assertFalse(PKResetChildProxy.objects.get(pk=child.pk).value)
++        self.assertEqual(PKResetChildProxy.objects.count(), 2)
++
++    def test_create_new_instance_with_pk_equals_none_multi_inheritance(self):
++        child = PKResetMultiChild.objects.create(value=True, other_value=True)
++        original_pk = child.pk
++        original_other_pk = child.other_parent_id
++
++        child.pk = None
++        child.value = False
++        child.save()
++
++        self.assertTrue(PKResetParent.objects.get(pk=original_pk).value)
++        self.assertTrue(PKResetOtherParent.objects.get(pk=original_other_pk).other_value)
++        copied_child = PKResetMultiChild.objects.get(pk=child.pk)
++        self.assertFalse(copied_child.value)
++        self.assertTrue(copied_child.other_value)
++        self.assertEqual(PKResetOtherParent.objects.count(), 2)
++        self.assertEqual(PKResetMultiChild.objects.count(), 2)
++
++    def test_create_new_instance_with_pk_equals_none_parent_links(self):
++        for model in (ParkingLot, ParkingLot3):
++            with self.subTest(model=model):
++                child_kwargs = {'name': 'original', 'address': 'address'}
++                if model is ParkingLot:
++                    child_kwargs['capacity'] = 10
++                child = model.objects.create(**child_kwargs)
++                original_pk = child.pk
++
++                child.pk = None
++                child.name = 'copy'
++                child.save()
++
++                self.assertEqual(model.objects.count(), 2)
++                self.assertEqual(Place.objects.get(pk=original_pk).name, 'original')
++
++    def test_create_new_instance_with_pk_equals_none_nested_inheritance(self):
++        child = ItalianRestaurant.objects.create(
++            name='original', address='address', serves_hot_dogs=True,
++            serves_pizza=True, serves_gnocchi=True,
++        )
++        original_pk = child.pk
++
++        child.pk = None
++        child.name = 'copy'
++        child.save()
++
++        self.assertEqual(ItalianRestaurant.objects.count(), 2)
++        self.assertEqual(Place.objects.get(pk=original_pk).name, 'original')
++
+     def test_model_inheritance(self):
+         # Regression for #7350, #7202
+         # When you create a Parent object with a specific reference to an

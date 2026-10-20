@@ -1,0 +1,47 @@
+diff --git a/django/utils/http.py b/django/utils/http.py
+index 572cfb4347..86006a5d96 100644
+--- a/django/utils/http.py
++++ b/django/utils/http.py
+@@ -176,10 +176,10 @@ def parse_http_date(date):
+     try:
+         year = int(m.group('year'))
+         if year < 100:
+-            if year < 70:
+-                year += 2000
+-            else:
+-                year += 1900
++            current_year = datetime.datetime.now().year
++            year += current_year // 100 * 100
++            if year > current_year + 50:
++                year -= 100
+         month = MONTHS.index(m.group('mon').lower()) + 1
+         day = int(m.group('day'))
+         hour = int(m.group('hour'))
+diff --git a/tests/utils_tests/test_http.py b/tests/utils_tests/test_http.py
+index bc8bcfe977..caa1204203 100644
+--- a/tests/utils_tests/test_http.py
++++ b/tests/utils_tests/test_http.py
+@@ -318,7 +318,22 @@ class HttpDateProcessingTests(unittest.TestCase):
+ 
+     def test_parsing_rfc850(self):
+         parsed = parse_http_date('Sunday, 06-Nov-94 08:49:37 GMT')
+-        self.assertEqual(datetime.utcfromtimestamp(parsed), datetime(1994, 11, 6, 8, 49, 37))
++        current_year = datetime.now().year
++        year = current_year // 100 * 100 + 94
++        if year > current_year + 50:
++            year -= 100
++        self.assertEqual(
++            datetime.utcfromtimestamp(parsed), datetime(year, 11, 6, 8, 49, 37),
++        )
++
++    def test_parsing_rfc850_year_more_than_50_years_in_future(self):
++        current_year = datetime.now().year
++        year = current_year + 51
++        parsed = parse_http_date('Sunday, 06-Nov-%02d 08:49:37 GMT' % (year % 100))
++        self.assertEqual(
++            datetime.utcfromtimestamp(parsed),
++            datetime(year - 100, 11, 6, 8, 49, 37),
++        )
+ 
+     def test_parsing_asctime(self):
+         parsed = parse_http_date('Sun Nov  6 08:49:37 1994')

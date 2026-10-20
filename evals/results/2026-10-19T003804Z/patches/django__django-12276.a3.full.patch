@@ -1,0 +1,95 @@
+diff --git a/django/forms/widgets.py b/django/forms/widgets.py
+index 338d54d72f..139144690e 100644
+--- a/django/forms/widgets.py
++++ b/django/forms/widgets.py
+@@ -380,6 +380,17 @@ class FileInput(Input):
+         """File input never renders a value."""
+         return
+ 
++    def use_required_attribute(self, initial):
++        use_required_attribute = super().use_required_attribute(initial)
++        if not use_required_attribute:
++            return False
++        try:
++            return not initial
++        except Exception:
++            # Fall back to the previous FileInput behavior for invalid
++            # initial values that don't support truth testing.
++            return use_required_attribute
++
+     def value_from_datadict(self, data, files, name):
+         "File widgets take data from FILES, not POST"
+         return files.get(name)
+@@ -451,9 +462,6 @@ class ClearableFileInput(FileInput):
+             return False
+         return upload
+ 
+-    def use_required_attribute(self, initial):
+-        return super().use_required_attribute(initial) and not initial
+-
+     def value_omitted_from_data(self, data, files, name):
+         return (
+             super().value_omitted_from_data(data, files, name) and
+diff --git a/tests/forms_tests/tests/test_forms.py b/tests/forms_tests/tests/test_forms.py
+index 552f3b866c..fced4c2886 100644
+--- a/tests/forms_tests/tests/test_forms.py
++++ b/tests/forms_tests/tests/test_forms.py
+@@ -4,12 +4,13 @@ import json
+ import uuid
+ 
+ from django.core.exceptions import NON_FIELD_ERRORS
++from django.core.files.base import ContentFile
+ from django.core.files.uploadedfile import SimpleUploadedFile
+ from django.core.validators import MaxValueValidator, RegexValidator
+ from django.forms import (
+     BooleanField, CharField, CheckboxSelectMultiple, ChoiceField, DateField,
+-    DateTimeField, EmailField, FileField, FloatField, Form, HiddenInput,
+-    ImageField, IntegerField, MultipleChoiceField, MultipleHiddenInput,
++    DateTimeField, EmailField, FileField, FileInput, FloatField, Form,
++    HiddenInput, ImageField, IntegerField, MultipleChoiceField, MultipleHiddenInput,
+     MultiValueField, NullBooleanField, PasswordInput, RadioSelect, Select,
+     SplitDateTimeField, SplitHiddenDateTimeWidget, Textarea, TextInput,
+     TimeField, ValidationError, forms,
+@@ -2478,6 +2479,20 @@ Password: <input type="password" name="password" required>
+             '<tr><th>File1:</th><td><input type="file" name="file1"></td></tr>',
+         )
+ 
++    def test_filefield_with_fileinput_required(self):
++        class FileForm(forms.Form):
++            file = forms.FileField(widget=FileInput)
++
++        self.assertHTMLEqual(
++            str(FileForm()['file']),
++            '<input type="file" name="file" required id="id_file">',
++        )
++        form = FileForm(initial={'file': ContentFile(b'baz', name='baz.txt')})
++        self.assertHTMLEqual(
++            str(form['file']),
++            '<input type="file" name="file" id="id_file">',
++        )
++
+     def test_filefield_initial_callable(self):
+         class FileForm(forms.Form):
+             file1 = forms.FileField(initial=lambda: 'resume.txt')
+diff --git a/tests/forms_tests/widget_tests/test_fileinput.py b/tests/forms_tests/widget_tests/test_fileinput.py
+index bbd7c7fe52..4a47a8ba44 100644
+--- a/tests/forms_tests/widget_tests/test_fileinput.py
++++ b/tests/forms_tests/widget_tests/test_fileinput.py
+@@ -15,6 +15,17 @@ class FileInputTest(WidgetTest):
+         self.check_html(self.widget, 'email', '', html='<input type="file" name="email">')
+         self.check_html(self.widget, 'email', None, html='<input type="file" name="email">')
+ 
++    def test_use_required_attribute(self):
++        self.assertIs(self.widget.use_required_attribute(None), True)
++        self.assertIs(self.widget.use_required_attribute(''), True)
++        self.assertIs(self.widget.use_required_attribute('resume.txt'), False)
++
++        class InvalidInitial:
++            def __bool__(self):
++                raise ValueError('Invalid initial value')
++
++        self.assertIs(self.widget.use_required_attribute(InvalidInitial()), True)
++
+     def test_value_omitted_from_data(self):
+         self.assertIs(self.widget.value_omitted_from_data({}, {}, 'field'), True)
+         self.assertIs(self.widget.value_omitted_from_data({}, {'field': 'value'}, 'field'), False)

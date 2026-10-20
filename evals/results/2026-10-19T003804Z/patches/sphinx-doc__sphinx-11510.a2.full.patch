@@ -1,0 +1,76 @@
+diff --git a/sphinx/parsers.py b/sphinx/parsers.py
+index 1269884ab..f1c2bd1d9 100644
+--- a/sphinx/parsers.py
++++ b/sphinx/parsers.py
+@@ -2,6 +2,7 @@
+ 
+ from __future__ import annotations
+ 
++from functools import lru_cache
+ from typing import TYPE_CHECKING, Any
+ 
+ import docutils.parsers
+@@ -46,6 +47,51 @@ class Parser(docutils.parsers.Parser):
+         self.env = app.env
+ 
+ 
++class _SphinxIncludeStateMachine:
++    def add_states(self, state_classes: list[type]) -> None:
++        super().add_states(state_classes)  # type: ignore[misc]
++        # Directives run in nested state machines, which must also handle
++        # include input (and nested includes) using this implementation.
++        for state in self.states.values():
++            state.nested_sm = _sphinx_nested_state_machine(state.nested_sm)
++            # Docutils stores this cache on the state class; keep our custom
++            # state machine instances separate from the standard ones.
++            state.nested_sm_cache = []
++
++    def insert_input(self, input_lines: list[str], source: str) -> None:
++        # The include directive appends these lines to mark the end of an
++        # inclusion.  Keep them out of the source-read event, and retain them
++        # when inserting the (possibly modified) content into the state machine.
++        end_marker = '.. end of inclusion from "%s"' % source
++        if len(input_lines) >= 2 and input_lines[-2:] == ['', end_marker]:
++            include_lines = input_lines[:-2]
++            content = '\n'.join(include_lines)
++            arg = [content]
++            self.document.settings.env.events.emit('source-read', source, arg)
++            # Keep the original lines unchanged when handlers make no valid
++            # replacement, preserving docutils' original blank-line handling.
++            if arg and isinstance(arg[0], str) and arg[0] != content:
++                input_lines = arg[0].splitlines() + ['', end_marker]
++
++        super().insert_input(input_lines, source)  # type: ignore[misc]
++
++
++class SphinxNestedStateMachine(_SphinxIncludeStateMachine, states.NestedStateMachine):
++    """Nested state machine that emits ``source-read`` for included files."""
++
++
++@lru_cache(maxsize=None)
++def _sphinx_nested_state_machine(state_machine: type) -> type:
++    if issubclass(state_machine, _SphinxIncludeStateMachine):
++        return state_machine
++    if state_machine is states.NestedStateMachine:
++        return SphinxNestedStateMachine
++
++    # Preserve any state-machine customizations made by a parser subclass.
++    return type('Sphinx' + state_machine.__name__,
++                (_SphinxIncludeStateMachine, state_machine), {})
++
++
+ class RSTParser(docutils.parsers.rst.Parser, Parser):
+     """A reST parser for Sphinx."""
+ 
+@@ -66,6 +112,11 @@ class RSTParser(docutils.parsers.rst.Parser, Parser):
+             state_classes=self.state_classes,
+             initial_state=self.initial_state,
+             debug=document.reporter.debug_flag)
++        for state in self.statemachine.states.values():
++            state.nested_sm = _sphinx_nested_state_machine(state.nested_sm)
++            # Docutils stores this cache on the state class; keep our custom
++            # state machine instances separate from the standard ones.
++            state.nested_sm_cache = []
+ 
+         # preprocess inputstring
+         if isinstance(inputstring, str):

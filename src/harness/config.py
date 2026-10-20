@@ -4,10 +4,16 @@ from .settings import settings
 
 
 def _defaults(model_id: str, kwargs: dict) -> dict:
-    kwargs.setdefault("temperature", settings.temperature)
+    # gpt-6-luna rejects temperature=0; only the default value 1 is valid.
+    # Tools plus reasoning_effort also require the Responses API, not chat completions.
+    if "gpt-6" in model_id:
+        kwargs.setdefault("temperature", 1)
+        kwargs.setdefault("use_responses_api", True)
+    else:
+        kwargs.setdefault("temperature", settings.temperature)
     kwargs.setdefault("stream_usage", True)
 
-    if "gpt-5" in model_id:
+    if "gpt-5" in model_id or "gpt-6" in model_id:
         kwargs.setdefault("reasoning_effort", settings.reasoning_effort)
 
     if model_id.startswith("openai:") and settings.openai_api_key:

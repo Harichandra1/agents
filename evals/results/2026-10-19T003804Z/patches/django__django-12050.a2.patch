@@ -1,0 +1,25 @@
+diff --git a/django/db/models/sql/query.py b/django/db/models/sql/query.py
+index ea51912e8b..f0616a5c4e 100644
+--- a/django/db/models/sql/query.py
++++ b/django/db/models/sql/query.py
+@@ -1073,7 +1073,19 @@ class Query(BaseExpression):
+                         ))
+                 else:
+                     resolved_values.append(sub_value)
+-            value = tuple(resolved_values)
++            value_type = value.__class__
++            try:
++                value = value_type(resolved_values)
++            except Exception:
++                # A subclass of list or tuple may require additional
++                # arguments to construct. Preserve its iterable type.
++                if isinstance(value, tuple) and hasattr(value_type, '_fields'):
++                    try:
++                        value = value_type._make(resolved_values)
++                    except Exception:
++                        value = tuple(resolved_values)
++                else:
++                    value = list(resolved_values) if isinstance(value, list) else tuple(resolved_values)
+         return value
+ 
+     def solve_lookup_type(self, lookup):

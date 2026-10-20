@@ -1,0 +1,59 @@
+diff --git a/django/contrib/admin/options.py b/django/contrib/admin/options.py
+index 69a5fbf389..b3c4020f39 100644
+--- a/django/contrib/admin/options.py
++++ b/django/contrib/admin/options.py
+@@ -250,15 +250,16 @@ class BaseModelAdmin(metaclass=forms.MediaDefiningClass):
+         db = kwargs.get('using')
+ 
+         autocomplete_fields = self.get_autocomplete_fields(request)
+-        if db_field.name in autocomplete_fields:
+-            kwargs['widget'] = AutocompleteSelectMultiple(db_field.remote_field, self.admin_site, using=db)
+-        elif db_field.name in self.raw_id_fields:
+-            kwargs['widget'] = widgets.ManyToManyRawIdWidget(db_field.remote_field, self.admin_site, using=db)
+-        elif db_field.name in [*self.filter_vertical, *self.filter_horizontal]:
+-            kwargs['widget'] = widgets.FilteredSelectMultiple(
+-                db_field.verbose_name,
+-                db_field.name in self.filter_vertical
+-            )
++        if 'widget' not in kwargs:
++            if db_field.name in autocomplete_fields:
++                kwargs['widget'] = AutocompleteSelectMultiple(db_field.remote_field, self.admin_site, using=db)
++            elif db_field.name in self.raw_id_fields:
++                kwargs['widget'] = widgets.ManyToManyRawIdWidget(db_field.remote_field, self.admin_site, using=db)
++            elif db_field.name in [*self.filter_vertical, *self.filter_horizontal]:
++                kwargs['widget'] = widgets.FilteredSelectMultiple(
++                    db_field.verbose_name,
++                    db_field.name in self.filter_vertical
++                )
+ 
+         if 'queryset' not in kwargs:
+             queryset = self.get_field_queryset(db, db_field, request)
+diff --git a/tests/admin_widgets/tests.py b/tests/admin_widgets/tests.py
+index 719d0d8095..9f54c72461 100644
+--- a/tests/admin_widgets/tests.py
++++ b/tests/admin_widgets/tests.py
+@@ -14,7 +14,9 @@ from django.contrib.admin.tests import AdminSeleniumTestCase
+ from django.contrib.auth.models import User
+ from django.core.files.storage import default_storage
+ from django.core.files.uploadedfile import SimpleUploadedFile
+-from django.db.models import CharField, DateField, DateTimeField, UUIDField
++from django.db.models import (
++    CharField, DateField, DateTimeField, ManyToManyField, UUIDField,
++)
+ from django.test import SimpleTestCase, TestCase, override_settings
+ from django.urls import reverse
+ from django.utils import translation
+@@ -121,6 +123,13 @@ class AdminFormfieldForDBFieldTests(SimpleTestCase):
+         self.assertFormfield(Event, 'start_date', forms.TextInput,
+                              formfield_overrides={DateField: {'widget': forms.TextInput}})
+ 
++    def test_formfield_overrides_m2m_filter_widget(self):
++        self.assertFormfield(
++            Band, 'members', forms.TextInput,
++            filter_vertical=['members'],
++            formfield_overrides={ManyToManyField: {'widget': forms.TextInput}},
++        )
++
+     def test_formfield_overrides_widget_instances(self):
+         """
+         Widget instances in formfield_overrides are not shared between

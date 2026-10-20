@@ -1,0 +1,55 @@
+diff --git a/django/db/models/deletion.py b/django/db/models/deletion.py
+index ae82d26340..5ac73ef3b1 100644
+--- a/django/db/models/deletion.py
++++ b/django/db/models/deletion.py
+@@ -105,6 +105,32 @@ class Collector:
+                 source._meta.concrete_model, set()).add(model._meta.concrete_model)
+         return new_objs
+ 
++    def _add_fast_delete(self, queryset):
++        """Add a queryset to fast deletes, combining compatible queries."""
++        max_params = connections[self.using].features.max_query_params
++        for i, qs in enumerate(self.fast_deletes):
++            if qs.model != queryset.model:
++                continue
++            try:
++                combined = qs | queryset
++            except (AssertionError, TypeError, ValueError):
++                # These querysets aren't compatible for an OR combination.
++                continue
++            # Keep the combined query within the backend's parameter limit;
++            # fast-delete querysets can already be split into batches.
++            if max_params is not None:
++                try:
++                    params = combined.query.get_compiler(using=self.using).as_sql()[1]
++                except Exception:
++                    # If the backend can't compile the combined query, retain
++                    # the original fast-delete queries.
++                    continue
++                if len(params) > max_params:
++                    continue
++            self.fast_deletes[i] = combined
++            return
++        self.fast_deletes.append(queryset)
++
+     def add_field_update(self, field, value, objs):
+         """
+         Schedule a field update. 'objs' must be a homogeneous iterable
+@@ -191,7 +217,7 @@ class Collector:
+         If 'keep_parents' is True, data of parent model's will be not deleted.
+         """
+         if self.can_fast_delete(objs):
+-            self.fast_deletes.append(objs)
++            self._add_fast_delete(objs)
+             return
+         new_objs = self.add(objs, source, nullable,
+                             reverse_dependency=reverse_dependency)
+@@ -225,7 +251,7 @@ class Collector:
+                 for batch in batches:
+                     sub_objs = self.related_objects(related, batch)
+                     if self.can_fast_delete(sub_objs, from_field=field):
+-                        self.fast_deletes.append(sub_objs)
++                        self._add_fast_delete(sub_objs)
+                     else:
+                         related_model = related.related_model
+                         # Non-referenced fields can be deferred if no signal

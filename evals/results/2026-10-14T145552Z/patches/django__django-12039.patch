@@ -1,0 +1,52 @@
+diff --git a/django/db/backends/ddl_references.py b/django/db/backends/ddl_references.py
+index 44e49806f8..b4537789ef 100644
+--- a/django/db/backends/ddl_references.py
++++ b/django/db/backends/ddl_references.py
+@@ -83,10 +83,15 @@ class Columns(TableColumns):
+ 
+     def __str__(self):
+         def col_str(column, idx):
++            col = self.quote_name(column)
+             try:
+-                return self.quote_name(column) + self.col_suffixes[idx]
++                suffix = self.col_suffixes[idx]
+             except IndexError:
+-                return self.quote_name(column)
++                pass
++            else:
++                if suffix:
++                    col = '{} {}'.format(col, suffix)
++            return col
+ 
+         return ', '.join(col_str(column, idx) for idx, column in enumerate(self.columns))
+ 
+@@ -114,9 +119,12 @@ class IndexColumns(Columns):
+             # length as self.columns.
+             col = '{} {}'.format(self.quote_name(column), self.opclasses[idx])
+             try:
+-                col = '{} {}'.format(col, self.col_suffixes[idx])
++                suffix = self.col_suffixes[idx]
+             except IndexError:
+                 pass
++            else:
++                if suffix:
++                    col = '{} {}'.format(col, suffix)
+             return col
+ 
+         return ', '.join(col_str(column, idx) for idx, column in enumerate(self.columns))
+diff --git a/tests/indexes/tests.py b/tests/indexes/tests.py
+index 588feaddff..696356fc6d 100644
+--- a/tests/indexes/tests.py
++++ b/tests/indexes/tests.py
+@@ -75,6 +75,11 @@ class SchemaIndexesTests(TestCase):
+         index_sql = connection.schema_editor()._model_indexes_sql(IndexTogetherSingleList)
+         self.assertEqual(len(index_sql), 1)
+ 
++    def test_descending_columns_list_sql(self):
++        index = Index(fields=['-headline'], name='descending_idx')
++        sql = str(index.create_sql(Article, connection.schema_editor()))
++        self.assertIn('(%s DESC)' % connection.ops.quote_name('headline'), sql)
++
+ 
+ @skipIf(connection.vendor == 'postgresql', 'opclasses are PostgreSQL only')
+ class SchemaIndexesNotPostgreSQLTests(TransactionTestCase):

@@ -1,0 +1,49 @@
+diff --git a/sphinx/directives/other.py b/sphinx/directives/other.py
+index 19f7c0a8d..d86ef5374 100644
+--- a/sphinx/directives/other.py
++++ b/sphinx/directives/other.py
+@@ -369,14 +369,37 @@ class Include(BaseInclude, SphinxDirective):
+     """
+ 
+     def run(self) -> list[Node]:
+-        if self.arguments[0].startswith('<') and \
+-           self.arguments[0].endswith('>'):
+-            # docutils "standard" includes, do not do path processing
++        # docutils "standard" includes do not need path processing.
++        if not (self.arguments[0].startswith('<') and
++                self.arguments[0].endswith('>')):
++            rel_filename, filename = self.env.relfn2path(self.arguments[0])
++            self.arguments[0] = filename
++            self.env.note_included(filename)
++
++        # docutils inserts reST includes into the current state machine's
++        # input stream.  Emit source-read at that point so extensions can
++        # modify the included text before it is parsed.
++        state_machine = self.state_machine
++        original_insert_input = state_machine.insert_input
++        has_instance_insert_input = 'insert_input' in state_machine.__dict__
++        instance_insert_input = state_machine.__dict__.get('insert_input')
++
++        def insert_input(include_lines: list[str], path: str) -> None:
++            source_text = '\n'.join(include_lines)
++            arg = [source_text]
++            self.env.events.emit('source-read', path, arg)
++            if arg[0] != source_text:
++                include_lines = arg[0].splitlines()
++            original_insert_input(include_lines, path)
++
++        state_machine.insert_input = insert_input
++        try:
+             return super().run()
+-        rel_filename, filename = self.env.relfn2path(self.arguments[0])
+-        self.arguments[0] = filename
+-        self.env.note_included(filename)
+-        return super().run()
++        finally:
++            if not has_instance_insert_input:
++                del state_machine.insert_input
++            else:
++                state_machine.insert_input = instance_insert_input
+ 
+ 
+ def setup(app: Sphinx) -> dict[str, Any]:

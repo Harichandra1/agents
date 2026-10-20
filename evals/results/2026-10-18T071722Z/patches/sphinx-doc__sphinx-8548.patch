@@ -1,0 +1,38 @@
+diff --git a/sphinx/ext/autodoc/importer.py b/sphinx/ext/autodoc/importer.py
+index d6e73d36a..47ac372fa 100644
+--- a/sphinx/ext/autodoc/importer.py
++++ b/sphinx/ext/autodoc/importer.py
+@@ -309,11 +309,28 @@ def get_class_members(subject: Any, objpath: List[str], attrgetter: Callable,
+ 
+     if analyzer:
+         # append instance attributes (cf. self.attr1) if analyzer knows
+-        namespace = '.'.join(objpath)
+-        for (ns, name), docstring in analyzer.attr_docs.items():
+-            if namespace == ns and name not in members:
+-                members[name] = ClassAttribute(subject, name, INSTANCEATTR,
+-                                               '\n'.join(docstring))
++        # Also look in base class namespaces so that documented attributes
++        # inherited from a base class can be documented on the subclass.
++        for i, cls in enumerate(getmro(subject)):
++            if i == 0:
++                namespace = '.'.join(objpath)
++            else:
++                namespace = cls.__qualname__
++
++            for (ns, name), docstring in analyzer.attr_docs.items():
++                if namespace != ns:
++                    continue
++
++                if name not in members:
++                    members[name] = ClassAttribute(cls, name, INSTANCEATTR,
++                                                   '\n'.join(docstring))
++                elif (i > 0 and members[name].class_ is not subject and
++                      members[name].docstring is None):
++                    # Keep the inherited value, but associate the documented
++                    # attribute with its defining base class.
++                    member = members[name]
++                    members[name] = ClassAttribute(cls, name, member.value,
++                                                   '\n'.join(docstring))
+ 
+     return members
+ 

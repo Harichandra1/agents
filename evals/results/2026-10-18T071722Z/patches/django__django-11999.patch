@@ -1,0 +1,26 @@
+diff --git a/django/db/models/fields/__init__.py b/django/db/models/fields/__init__.py
+index ee45bb941e..7ba5244924 100755
+--- a/django/db/models/fields/__init__.py
++++ b/django/db/models/fields/__init__.py
+@@ -763,8 +763,19 @@ class Field(RegisterLookupMixin):
+             if not getattr(cls, self.attname, None):
+                 setattr(cls, self.attname, self.descriptor_class(self))
+         if self.choices is not None:
+-            setattr(cls, 'get_%s_display' % self.name,
+-                    partialmethod(cls._get_FIELD_display, field=self))
++            display_method = 'get_%s_display' % self.name
++            existing = next((
++                base.__dict__[display_method]
++                for base in cls.__mro__ if display_method in base.__dict__
++            ), None)
++            if existing is None or (
++                isinstance(existing, partialmethod) and any(
++                    existing.func is base.__dict__.get('_get_FIELD_display')
++                    for base in cls.__mro__
++                )
++            ):
++                setattr(cls, display_method,
++                        partialmethod(cls._get_FIELD_display, field=self))
+ 
+     def get_filter_kwargs_for_object(self, obj):
+         """

@@ -1,0 +1,41 @@
+diff --git a/sphinx/ext/napoleon/docstring.py b/sphinx/ext/napoleon/docstring.py
+index b3daa06f1..15554d75d 100644
+--- a/sphinx/ext/napoleon/docstring.py
++++ b/sphinx/ext/napoleon/docstring.py
+@@ -1087,6 +1087,36 @@ class NumpyDocstring(GoogleDocstring):
+         else:
+             return func(name)
+ 
++    def _parse_parameters_section(self, section: str) -> List[str]:
++        fields = self._consume_fields()
++        if self._config.napoleon_use_param:
++            if not fields:
++                return self._format_docutils_params(fields)
++
++            # A NumPy parameter field can declare multiple parameter names.
++            # Keep those names, their type, and their description together
++            # rather than emitting a single (unrecognized) ``:param`` field.
++            lines = []
++            i = 0
++            while i < len(fields):
++                multiple = ',' in fields[i][0]
++                j = i + 1
++                while j < len(fields) and (',' in fields[j][0]) == multiple:
++                    j += 1
++
++                if multiple:
++                    formatted = self._format_fields(_('Parameters'), fields[i:j])
++                else:
++                    formatted = self._format_docutils_params(fields[i:j])
++
++                if lines and lines[-1] == '':
++                    lines.pop()
++                lines.extend(formatted)
++                i = j
++            return lines
++        else:
++            return self._format_fields(_('Parameters'), fields)
++
+     def _consume_field(self, parse_type: bool = True, prefer_type: bool = False
+                        ) -> Tuple[str, str, List[str]]:
+         line = next(self._line_iter)

@@ -1,0 +1,38 @@
+diff --git a/sphinx/domains/python.py b/sphinx/domains/python.py
+index 000e2e8d3..5afe2993a 100644
+--- a/sphinx/domains/python.py
++++ b/sphinx/domains/python.py
+@@ -354,7 +354,7 @@ class PyObject(ObjectDescription):
+                             'keyword', 'kwarg', 'kwparam'),
+                      typerolename='class', typenames=('paramtype', 'type'),
+                      can_collapse=True),
+-        PyTypedField('variable', label=_('Variables'), rolename='obj',
++        PyTypedField('variable', label=_('Variables'),
+                      names=('var', 'ivar', 'cvar'),
+                      typerolename='class', typenames=('vartype',),
+                      can_collapse=True),
+diff --git a/tests/test_domain_py.py b/tests/test_domain_py.py
+index e0c690518..777e0f2ba 100644
+--- a/tests/test_domain_py.py
++++ b/tests/test_domain_py.py
+@@ -838,6 +838,20 @@ def test_info_field_list(app):
+                 **{"py:module": "example", "py:class": "Class"})
+ 
+ 
++def test_info_field_list_var(app):
++    text = (".. py:module:: example\n"
++            ".. py:data:: name\n"
++            ".. py:class:: Class\n"
++            "\n"
++            "   :ivar int name: blah blah\n")
++    doctree = restructuredtext.parse(app, text)
++
++    refnodes = list(doctree.findall(pending_xref))
++    assert len(refnodes) == 1
++    assert_node(refnodes[0], pending_xref, refdomain="py", reftype="class",
++                reftarget="int", **{"py:module": "example", "py:class": "Class"})
++
++
+ @pytest.mark.sphinx(freshenv=True)
+ def test_module_index(app):
+     text = (".. py:module:: docutils\n"

@@ -1,0 +1,37 @@
+diff --git a/sphinx/builders/gettext.py b/sphinx/builders/gettext.py
+index e8bc547b7..214ec37fd 100644
+--- a/sphinx/builders/gettext.py
++++ b/sphinx/builders/gettext.py
+@@ -32,7 +32,31 @@ class Message:
+     """An entry of translatable message."""
+     def __init__(self, text: str, locations: List[Tuple[str, int]], uuids: List[str]):
+         self.text = text
+-        self.locations = locations
++        if not isinstance(locations, list):
++            self.locations = locations
++        else:
++            unique_locations: List[Tuple[str, int]] = []
++            seen_locations: Set[Tuple[str, int]] = set()
++            duplicate_found = False
++            try:
++                for location in locations:
++                    source, line = location
++                    try:
++                        key = (path.normcase(path.abspath(source)), line)
++                        duplicate = key in seen_locations
++                        seen_locations.add(key)
++                    except Exception:
++                        # Keep locations that cannot be normalized as before.
++                        duplicate = False
++                    if duplicate:
++                        duplicate_found = True
++                    else:
++                        unique_locations.append(location)
++            except Exception:
++                # Invalid location collections were accepted by Message before.
++                self.locations = locations
++            else:
++                self.locations = unique_locations if duplicate_found else locations
+         self.uuids = uuids
+ 
+ 

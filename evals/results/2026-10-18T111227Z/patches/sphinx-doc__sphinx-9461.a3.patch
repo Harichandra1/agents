@@ -1,0 +1,88 @@
+diff --git a/sphinx/ext/autodoc/__init__.py b/sphinx/ext/autodoc/__init__.py
+index 1cecb1f79..42e8dbd80 100644
+--- a/sphinx/ext/autodoc/__init__.py
++++ b/sphinx/ext/autodoc/__init__.py
+@@ -24,8 +24,8 @@ from sphinx.application import Sphinx
+ from sphinx.config import ENUM, Config
+ from sphinx.deprecation import RemovedInSphinx50Warning, RemovedInSphinx60Warning
+ from sphinx.environment import BuildEnvironment
+-from sphinx.ext.autodoc.importer import (get_class_members, get_object_members, import_module,
+-                                         import_object)
++from sphinx.ext.autodoc.importer import (_get_classmethod_property, get_class_members,
++                                         get_object_members, import_module, import_object)
+ from sphinx.ext.autodoc.mock import ismock, mock, undecorate
+ from sphinx.locale import _, __
+ from sphinx.pycode import ModuleAnalyzer, PycodeError
+@@ -2721,6 +2721,11 @@ def autodoc_attrgetter(app: Sphinx, obj: Any, name: str, *defargs: Any) -> Any:
+         if isinstance(obj, typ):
+             return func(obj, name, *defargs)
+ 
++    if inspect.isclass(obj):
++        classmethod_property = _get_classmethod_property(obj, name)
++        if classmethod_property is not None:
++            return classmethod_property
++
+     return safe_getattr(obj, name, *defargs)
+ 
+ 
+diff --git a/sphinx/ext/autodoc/importer.py b/sphinx/ext/autodoc/importer.py
+index 1a8ea0973..321a07679 100644
+--- a/sphinx/ext/autodoc/importer.py
++++ b/sphinx/ext/autodoc/importer.py
+@@ -74,6 +74,26 @@ def import_module(modname: str, warningiserror: bool = False) -> Any:
+         raise ImportError(exc, traceback.format_exc()) from exc
+ 
+ 
++def _get_classmethod_property(subject: Any, name: str) -> Any:
++    """Get a property wrapped by classmethod from a class."""
++    for cls in getmro(subject):
++        try:
++            namespace = safe_getattr(cls, '__dict__', None)
++            if namespace is None:
++                return None
++            if name not in namespace:
++                continue
++            member = namespace[name]
++        except Exception:
++            return None
++
++        if isinstance(member, classmethod) and isinstance(member.__func__, property):
++            return member.__func__
++        return None
++
++    return None
++
++
+ def import_object(modname: str, objpath: List[str], objtype: str = '',
+                   attrgetter: Callable[[Any, str], Any] = safe_getattr,
+                   warningiserror: bool = False) -> Any:
+@@ -107,7 +127,14 @@ def import_object(modname: str, objpath: List[str], objtype: str = '',
+             parent = obj
+             logger.debug('[autodoc] getattr(_, %r)', attrname)
+             mangled_name = mangle(obj, attrname)
+-            obj = attrgetter(obj, mangled_name)
++            if isclass(obj) and attrgetter is safe_getattr:
++                classmethod_property = _get_classmethod_property(obj, mangled_name)
++                if classmethod_property is not None:
++                    obj = classmethod_property
++                else:
++                    obj = attrgetter(obj, mangled_name)
++            else:
++                obj = attrgetter(obj, mangled_name)
+ 
+             try:
+                 logger.debug('[autodoc] => %r', obj)
+@@ -274,7 +301,12 @@ def get_class_members(subject: Any, objpath: List[str], attrgetter: Callable
+     # other members
+     for name in dir(subject):
+         try:
+-            value = attrgetter(subject, name)
++            if attrgetter is safe_getattr:
++                value = _get_classmethod_property(subject, name)
++                if value is None:
++                    value = attrgetter(subject, name)
++            else:
++                value = attrgetter(subject, name)
+             if ismock(value):
+                 value = undecorate(value)
+ 

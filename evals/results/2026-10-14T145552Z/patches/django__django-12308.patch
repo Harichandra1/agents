@@ -1,0 +1,37 @@
+diff --git a/django/contrib/admin/utils.py b/django/contrib/admin/utils.py
+index e4ddc8f017..4c079d29db 100644
+--- a/django/contrib/admin/utils.py
++++ b/django/contrib/admin/utils.py
+@@ -388,6 +388,8 @@ def display_for_field(value, field, empty_value_display):
+         return _boolean_icon(value)
+     elif value is None:
+         return empty_value_display
++    elif isinstance(field, models.JSONField):
++        return field.formfield().prepare_value(value)
+     elif isinstance(field, models.DateTimeField):
+         return formats.localize(timezone.template_localtime(value))
+     elif isinstance(field, (models.DateField, models.TimeField)):
+diff --git a/tests/admin_utils/tests.py b/tests/admin_utils/tests.py
+index 463ba9556d..dbfeb24655 100644
+--- a/tests/admin_utils/tests.py
++++ b/tests/admin_utils/tests.py
+@@ -139,6 +139,19 @@ class UtilsTests(SimpleTestCase):
+ 
+             self.assertEqual(value, resolved_value)
+ 
++    def test_json_display_for_field(self):
++        field = models.JSONField()
++        self.assertEqual(
++            display_for_field({'foo': 'bar'}, field, self.empty_value),
++            '{"foo": "bar"}',
++        )
++
++        invalid_value = field.formfield().bound_data('invalid JSON', None)
++        self.assertEqual(
++            display_for_field(invalid_value, field, self.empty_value),
++            'invalid JSON',
++        )
++
+     def test_null_display_for_field(self):
+         """
+         Regression test for #12550: display_for_field should handle None

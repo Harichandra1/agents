@@ -1,0 +1,72 @@
+diff --git a/sphinx/pycode/ast.py b/sphinx/pycode/ast.py
+index 9bafff11c..4df71d60c 100644
+--- a/sphinx/pycode/ast.py
++++ b/sphinx/pycode/ast.py
+@@ -151,6 +151,8 @@ class _UnparseVisitor(ast.NodeVisitor):
+         return "{" + ", ".join(items) + "}"
+ 
+     def visit_Index(self, node: ast.Index) -> str:
++        if isinstance(node.value, ast.Tuple):
++            return self._visit_tuple_elements(node.value)
+         return self.visit(node.value)
+ 
+     def visit_Lambda(self, node: ast.Lambda) -> str:
+@@ -166,14 +168,27 @@ class _UnparseVisitor(ast.NodeVisitor):
+         return "{" + ", ".join(self.visit(e) for e in node.elts) + "}"
+ 
+     def visit_Subscript(self, node: ast.Subscript) -> str:
+-        return "%s[%s]" % (self.visit(node.value), self.visit(node.slice))
++        if isinstance(node.slice, ast.Tuple):
++            slice_ = self._visit_tuple_elements(node.slice)
++        else:
++            slice_ = self.visit(node.slice)
++        return "%s[%s]" % (self.visit(node.value), slice_)
+ 
+     def visit_UnaryOp(self, node: ast.UnaryOp) -> str:
+         return "%s %s" % (self.visit(node.op), self.visit(node.operand))
+ 
++    def _visit_tuple_elements(self, node: ast.Tuple) -> str:
++        if not node.elts:
++            return "()"
++
++        elements = ", ".join(self.visit(e) for e in node.elts)
++        if len(node.elts) == 1:
++            elements += ","
++        return elements
++
+     def visit_Tuple(self, node: ast.Tuple) -> str:
+         if node.elts:
+-            return ", ".join(self.visit(e) for e in node.elts)
++            return "(" + self._visit_tuple_elements(node) + ")"
+         else:
+             return "()"
+ 
+diff --git a/tests/test_pycode_ast.py b/tests/test_pycode_ast.py
+index 9b12d24d5..d4f0e2810 100644
+--- a/tests/test_pycode_ast.py
++++ b/tests/test_pycode_ast.py
+@@ -33,9 +33,14 @@ from sphinx.pycode import ast
+     ("...", "..."),                             # Ellipsis
+     ("a // b", "a // b"),                       # FloorDiv
+     ("Tuple[int, int]", "Tuple[int, int]"),     # Index, Subscript
++    ("x[()]", "x[()]"),                         # Empty tuple index
++    ("x[1,]", "x[1,]"),                         # Single element tuple index
+     ("~ 1", "~ 1"),                             # Invert
+     ("lambda x, y: x + y",
+      "lambda x, y: ..."),                       # Lambda
++    ("lambda x=(1, 2, 3): x",
++     "lambda x=(1, 2, 3): ..."),                # Lambda with tuple default
++    ("lambda x=(1,): x", "lambda x=(1,): ..."), # Lambda with singleton tuple default
+     ("[1, 2, 3]", "[1, 2, 3]"),                 # List
+     ("a << b", "a << b"),                       # LShift
+     ("a @ b", "a @ b"),                         # MatMult
+@@ -53,7 +58,8 @@ from sphinx.pycode import ast
+     ("+ a", "+ a"),                             # UAdd
+     ("- 1", "- 1"),                             # UnaryOp
+     ("- a", "- a"),                             # USub
+-    ("(1, 2, 3)", "1, 2, 3"),                   # Tuple
++    ("(1, 2, 3)", "(1, 2, 3)"),                 # Tuple
++    ("(1,)", "(1,)"),                           # Tuple (single element)
+     ("()", "()"),                               # Tuple (empty)
+ ])
+ def test_unparse(source, expected):

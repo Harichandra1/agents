@@ -1,0 +1,83 @@
+diff --git a/CHANGES b/CHANGES
+index bc932a7d4..f22ce7fed 100644
+--- a/CHANGES
++++ b/CHANGES
+@@ -36,6 +36,7 @@ Features added
+   The warnings printed from this functionality can be suppressed by setting
+   :confval:`c_warn_on_allowed_pre_v3`` to ``True``.
+   The functionality is immediately deprecated.
++* #7985: linkcheck: Check local links to files in the source tree.
+ 
+ Bugs fixed
+ ----------
+diff --git a/doc/usage/configuration.rst b/doc/usage/configuration.rst
+index eba6904c4..868be8c84 100644
+--- a/doc/usage/configuration.rst
++++ b/doc/usage/configuration.rst
+@@ -2400,6 +2400,14 @@ Options for the linkcheck builder
+ 
+    .. versionadded:: 1.1
+ 
++.. confval:: linkcheck_check_local
++
++   If true, check that relative local links point to files in the source tree.
++   Absolute paths are not checked because their location depends on where the
++   documentation is deployed.  Default is ``True``.
++
++   .. versionadded:: 3.2
++
+ .. confval:: linkcheck_request_headers
+ 
+    A dictionary that maps baseurls to HTTP request headers.
+diff --git a/sphinx/builders/linkcheck.py b/sphinx/builders/linkcheck.py
+index dd5317087..793c9c6e9 100644
+--- a/sphinx/builders/linkcheck.py
++++ b/sphinx/builders/linkcheck.py
+@@ -213,7 +213,38 @@ class CheckExternalLinksBuilder(Builder):
+             if len(uri) == 0 or uri.startswith(('#', 'mailto:', 'ftp:')):
+                 return 'unchecked', '', 0
+             elif not uri.startswith(('http:', 'https:')):
+-                return 'local', '', 0
++                if not self.app.config.linkcheck_check_local:
++                    return 'local', '', 0
++                for rex in self.to_ignore:
++                    if rex.match(uri):
++                        return 'ignored', '', 0
++
++                # Only relative paths can be resolved reliably: absolute paths
++                # depend on where the document is deployed.
++                try:
++                    local_uri = urlparse(uri)
++                    local_path = unquote(local_uri.path)
++                    if (local_uri.scheme or local_uri.netloc or not local_path or
++                            path.isabs(local_path) or '\x00' in local_path):
++                        return 'local', '', 0
++
++                    srcdir = path.abspath(self.env.srcdir)
++                    filename = path.abspath(path.join(
++                        path.dirname(self.env.doc2path(docname)), local_path))
++                    if path.commonpath([srcdir, filename]) != srcdir:
++                        return 'local', '', 0
++                    exists = path.exists(filename)
++                except (OSError, ValueError):
++                    # Invalid or inaccessible local paths were previously
++                    # reported as local links, so keep that behavior.
++                    return 'local', '', 0
++
++                if exists:
++                    return 'local', '', 0
++                else:
++                    info = __('Local file not found')
++                    self.broken[uri] = info
++                    return 'broken', info, 0
+             elif uri in self.good:
+                 return 'working', 'old', 0
+             elif uri in self.broken:
+@@ -362,6 +393,7 @@ def setup(app: Sphinx) -> Dict[str, Any]:
+     app.add_config_value('linkcheck_timeout', None, None, [int])
+     app.add_config_value('linkcheck_workers', 5, None)
+     app.add_config_value('linkcheck_anchors', True, None)
++    app.add_config_value('linkcheck_check_local', True, None)
+     # Anchors starting with ! are ignored since they are
+     # commonly used for dynamic pages
+     app.add_config_value('linkcheck_anchors_ignore', ["^!"], None)

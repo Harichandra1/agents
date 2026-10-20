@@ -1,0 +1,70 @@
+diff --git a/sphinx/parsers.py b/sphinx/parsers.py
+index 1269884ab..ee6ad8c48 100644
+--- a/sphinx/parsers.py
++++ b/sphinx/parsers.py
+@@ -2,6 +2,7 @@
+ 
+ from __future__ import annotations
+ 
++import os
+ from typing import TYPE_CHECKING, Any
+ 
+ import docutils.parsers
+@@ -46,6 +47,47 @@ class Parser(docutils.parsers.Parser):
+         self.env = app.env
+ 
+ 
++def _process_included_source(state_machine: Any, input_lines: list[str],
++                             source: str) -> list[str]:
++    env = state_machine.document.settings.env
++    docname = env.path2doc(os.path.abspath(source))
++    if docname is not None:
++        # Include directives pass their contents as lines.  Reassemble the
++        # original source format while emitting the event, then convert the
++        # possibly modified source back to lines for the state machine.
++        content = '\n'.join(input_lines)
++        if input_lines:
++            content += '\n'
++        arg = [content]
++        env.events.emit('source-read', docname, arg)
++        return arg[0].splitlines()
++    return input_lines
++
++
++def _process_include_input(state_machine: Any, input_lines: list[str],
++                           source: str) -> list[str]:
++    marker = f'.. end of inclusion from "{source}"'
++    if input_lines[-2:] == ['', marker]:
++        return (_process_included_source(state_machine, input_lines[:-2], source) +
++                input_lines[-2:])
++    return _process_included_source(state_machine, input_lines, source)
++
++
++class SphinxNestedStateMachine(states.NestedStateMachine):
++    """A nested state machine that emits ``source-read`` for included files."""
++
++    def run(self, input_lines: list[str], input_offset: int, memo: Any,
++            node: nodes.Element, match_titles: bool = True) -> None:
++        for state in self.states.values():
++            if state.nested_sm is states.NestedStateMachine:
++                state.nested_sm = SphinxNestedStateMachine
++        super().run(input_lines, input_offset, memo, node, match_titles)
++
++    def insert_input(self, input_lines: list[str], source: str) -> None:
++        input_lines = _process_include_input(self, input_lines, source)
++        super().insert_input(input_lines, source)
++
++
+ class RSTParser(docutils.parsers.rst.Parser, Parser):
+     """A reST parser for Sphinx."""
+ 
+@@ -66,6 +108,9 @@ class RSTParser(docutils.parsers.rst.Parser, Parser):
+             state_classes=self.state_classes,
+             initial_state=self.initial_state,
+             debug=document.reporter.debug_flag)
++        for state in self.statemachine.states.values():
++            if state.nested_sm is states.NestedStateMachine:
++                state.nested_sm = SphinxNestedStateMachine
+ 
+         # preprocess inputstring
+         if isinstance(inputstring, str):

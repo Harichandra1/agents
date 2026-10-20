@@ -1,0 +1,34 @@
+diff --git a/sphinx/cmd/quickstart.py b/sphinx/cmd/quickstart.py
+index a40a21073..f029a2b04 100644
+--- a/sphinx/cmd/quickstart.py
++++ b/sphinx/cmd/quickstart.py
+@@ -223,7 +223,7 @@ def ask_user(d: Dict) -> None:
+         print(__('sphinx-quickstart will not overwrite existing Sphinx projects.'))
+         print()
+         d['path'] = do_prompt(__('Please enter a new root path (or just Enter to exit)'),
+-                              '', is_path)
++                              '', lambda x: x if not x else is_path(x))
+         if not d['path']:
+             sys.exit(1)
+ 
+diff --git a/tests/test_quickstart.py b/tests/test_quickstart.py
+index 94144ef22..e9a8f48f8 100644
+--- a/tests/test_quickstart.py
++++ b/tests/test_quickstart.py
+@@ -123,6 +123,16 @@ def test_quickstart_defaults(tempdir):
+     assert (tempdir / 'make.bat').isfile()
+ 
+ 
++def test_exits_when_existing_confpy(tempdir):
++    (tempdir / 'conf.py').write_text('')
++    qs.term_input = mock_input({'Root path': str(tempdir)})
++
++    with pytest.raises(SystemExit) as exc:
++        qs.ask_user({})
++
++    assert exc.value.code == 1
++
++
+ def test_quickstart_all_answers(tempdir):
+     answers = {
+         'Root path': tempdir,

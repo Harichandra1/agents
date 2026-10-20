@@ -1,0 +1,44 @@
+diff --git a/sphinx/util/inspect.py b/sphinx/util/inspect.py
+index a415a7074..29b4bee1e 100644
+--- a/sphinx/util/inspect.py
++++ b/sphinx/util/inspect.py
+@@ -432,6 +432,8 @@ def safe_getattr(obj: Any, name: str, *defargs: Any) -> Any:
+ 
+ def object_description(object: Any) -> str:
+     """A repr() implementation that returns text safe to use in reST context."""
++    if isinstance(object, enum.Enum):
++        return '%s.%s' % (type(object).__name__, object.name)
+     if isinstance(object, dict):
+         try:
+             sorted_keys = sorted(object)
+diff --git a/tests/test_util_inspect.py b/tests/test_util_inspect.py
+index de4ad9236..1c4e29631 100644
+--- a/tests/test_util_inspect.py
++++ b/tests/test_util_inspect.py
+@@ -10,6 +10,7 @@
+ 
+ import ast
+ import datetime
++import enum
+ import functools
+ import sys
+ import types
+@@ -472,6 +473,18 @@ def test_safe_getattr_with___dict___override():
+         pytest.fail('AttributeError not raised')
+ 
+ 
++def test_object_description_enum():
++    class MyEnum(enum.Enum):
++        ValueA = 10
++
++    assert inspect.object_description(MyEnum.ValueA) == 'MyEnum.ValueA'
++
++    def func(value=MyEnum.ValueA):
++        pass
++
++    assert stringify_signature(inspect.signature(func)) == '(value=MyEnum.ValueA)'
++
++
+ def test_dictionary_sorting():
+     dictionary = {"c": 3, "a": 1, "d": 2, "b": 4}
+     description = inspect.object_description(dictionary)

@@ -1,0 +1,87 @@
+diff --git a/sphinx/pycode/ast.py b/sphinx/pycode/ast.py
+index 9bafff11c..e9717406a 100644
+--- a/sphinx/pycode/ast.py
++++ b/sphinx/pycode/ast.py
+@@ -166,16 +166,30 @@ class _UnparseVisitor(ast.NodeVisitor):
+         return "{" + ", ".join(self.visit(e) for e in node.elts) + "}"
+ 
+     def visit_Subscript(self, node: ast.Subscript) -> str:
+-        return "%s[%s]" % (self.visit(node.value), self.visit(node.slice))
++        slice_node = node.slice
++        if isinstance(slice_node, ast.Index):
++            slice_node = slice_node.value
++        if isinstance(slice_node, ast.Tuple):
++            # A tuple used as a subscript is already delimited by the brackets.
++            elts = slice_node.elts or []
++            slice_ = ", ".join(self.visit(e) for e in elts)
++            if not elts:
++                slice_ = "()"
++            elif len(elts) == 1:
++                slice_ += ","
++        else:
++            slice_ = self.visit(node.slice)
++        return "%s[%s]" % (self.visit(node.value), slice_)
+ 
+     def visit_UnaryOp(self, node: ast.UnaryOp) -> str:
+         return "%s %s" % (self.visit(node.op), self.visit(node.operand))
+ 
+     def visit_Tuple(self, node: ast.Tuple) -> str:
+-        if node.elts:
+-            return ", ".join(self.visit(e) for e in node.elts)
+-        else:
+-            return "()"
++        elts = node.elts or []
++        elements = ", ".join(self.visit(e) for e in elts)
++        if len(elts) == 1:
++            elements += ","
++        return "(" + elements + ")"
+ 
+     if sys.version_info >= (3, 6):
+         def visit_Constant(self, node: ast.Constant) -> str:
+diff --git a/tests/test_pycode_ast.py b/tests/test_pycode_ast.py
+index 9b12d24d5..45cd6d591 100644
+--- a/tests/test_pycode_ast.py
++++ b/tests/test_pycode_ast.py
+@@ -33,6 +33,9 @@ from sphinx.pycode import ast
+     ("...", "..."),                             # Ellipsis
+     ("a // b", "a // b"),                       # FloorDiv
+     ("Tuple[int, int]", "Tuple[int, int]"),     # Index, Subscript
++    ("foo[()]", "foo[()]"),                     # empty tuple subscript
++    ("foo[(1,)]", "foo[1,]"),                   # singleton tuple subscript
++    ("foo[((1, 2),)]", "foo[(1, 2),]"),         # nested tuple subscript
+     ("~ 1", "~ 1"),                             # Invert
+     ("lambda x, y: x + y",
+      "lambda x, y: ..."),                       # Lambda
+@@ -53,7 +56,9 @@ from sphinx.pycode import ast
+     ("+ a", "+ a"),                             # UAdd
+     ("- 1", "- 1"),                             # UnaryOp
+     ("- a", "- a"),                             # USub
+-    ("(1, 2, 3)", "1, 2, 3"),                   # Tuple
++    ("(1, 2, 3)", "(1, 2, 3)"),                 # Tuple
++    ("(1,)", "(1,)"),                           # Tuple (single item)
++    ("((1, 2), 3)", "((1, 2), 3)"),             # Nested tuple
+     ("()", "()"),                               # Tuple (empty)
+ ])
+ def test_unparse(source, expected):
+diff --git a/tests/test_util_inspect.py b/tests/test_util_inspect.py
+index c21eaaa16..09cd1cbde 100644
+--- a/tests/test_util_inspect.py
++++ b/tests/test_util_inspect.py
+@@ -292,7 +292,8 @@ def test_signature_from_str_basic():
+ def test_signature_from_str_default_values():
+     signature = ('(a=0, b=0.0, c="str", d=b"bytes", e=..., f=True, '
+                  'g=[1, 2, 3], h={"a": 1}, i={1, 2, 3}, '
+-                 'j=lambda x, y: None, k=None, l=object(), m=foo.bar.CONSTANT)')
++                 'j=lambda x, y: None, k=None, l=object(), m=foo.bar.CONSTANT, '
++                 'n=(1, 2, 3))')
+     sig = inspect.signature_from_str(signature)
+     assert sig.parameters['a'].default == '0'
+     assert sig.parameters['b'].default == '0.0'
+@@ -307,6 +308,7 @@ def test_signature_from_str_default_values():
+     assert sig.parameters['k'].default == 'None'
+     assert sig.parameters['l'].default == 'object()'
+     assert sig.parameters['m'].default == 'foo.bar.CONSTANT'
++    assert sig.parameters['n'].default == '(1, 2, 3)'
+ 
+ 
+ def test_signature_from_str_annotations():

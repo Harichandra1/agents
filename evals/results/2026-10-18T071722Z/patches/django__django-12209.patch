@@ -1,0 +1,64 @@
+diff --git a/django/db/models/base.py b/django/db/models/base.py
+index e3b14a41a0..a7eb17206d 100644
+--- a/django/db/models/base.py
++++ b/django/db/models/base.py
+@@ -398,6 +398,12 @@ class ModelState:
+     # explicit (non-auto) PKs. This impacts validation only; it has no effect
+     # on the actual save.
+     adding = True
++    # Whether the primary key was explicitly provided when the instance was
++    # initialized. This distinguishes an explicit primary key from a value
++    # populated by a field default when saving new instances.
++    pk_explicit = False
++    # The generated PK value, used to detect an explicit assignment later.
++    pk_default = NOT_PROVIDED
+     fields_cache = ModelStateFieldsCacheDescriptor()
+ 
+ 
+@@ -414,6 +420,19 @@ class Model(metaclass=ModelBase):
+ 
+         # Set up the storage for instance state
+         self._state = ModelState()
++        pk_field = opts.pk
++        pk_names = {pk_field.name, pk_field.attname, 'pk'}
++        pk_explicit = any(
++            name in kwargs and kwargs[name] is not _DEFERRED and
++            kwargs[name] is not None
++            for name in pk_names
++        )
++        positional_fields = opts.fields if kwargs else opts.concrete_fields
++        pk_explicit = pk_explicit or any(
++            field is pk_field and value is not _DEFERRED and value is not None
++            for value, field in zip(args, positional_fields)
++        )
++        self._state.pk_explicit = pk_explicit
+ 
+         # There is a rather weird disparity here; if kwargs, it's set, then args
+         # overrides it. It should be one or the other; don't duplicate the work
+@@ -499,6 +518,8 @@ class Model(metaclass=ModelBase):
+                     pass
+             for kwarg in kwargs:
+                 raise TypeError("%s() got an unexpected keyword argument '%s'" % (cls.__name__, kwarg))
++        if not pk_explicit and pk_field.has_default():
++            self._state.pk_default = self._get_pk_val()
+         super().__init__()
+         post_init.send(sender=cls, instance=self)
+ 
+@@ -843,6 +864,8 @@ class Model(metaclass=ModelBase):
+         if pk_val is None:
+             pk_val = meta.pk.get_pk_value_on_save(self)
+             setattr(self, meta.pk.attname, pk_val)
++            if self._state.adding and not self._state.pk_explicit:
++                self._state.pk_default = pk_val
+         pk_set = pk_val is not None
+         if not pk_set and (force_update or update_fields):
+             raise ValueError("Cannot force an update in save() with no primary key.")
+@@ -851,6 +874,8 @@ class Model(metaclass=ModelBase):
+         if (
+             not force_insert and
+             self._state.adding and
++            not self._state.pk_explicit and
++            self._get_pk_val(meta) == self._state.pk_default and
+             self._meta.pk.default and
+             self._meta.pk.default is not NOT_PROVIDED
+         ):

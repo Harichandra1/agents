@@ -1,0 +1,33 @@
+diff --git a/sphinx/domains/python.py b/sphinx/domains/python.py
+index 79d7e4f46..bd38f320d 100644
+--- a/sphinx/domains/python.py
++++ b/sphinx/domains/python.py
+@@ -263,18 +263,25 @@ def _pseudo_parse_arglist(signode: desc_signature, arglist: str) -> None:
+         signode += paramlist
+ 
+ 
+-# This override allows our inline type specifiers to behave like :class: link
+-# when it comes to handling "." and "~" prefixes.
++# This override makes implicit type-field references behave like :class: links,
++# including their scope and handling of "." and "~" prefixes.
+ class PyXrefMixin:
+     def make_xref(self, rolename: str, domain: str, target: str,
+                   innernode: "Type[TextlikeNode]" = nodes.emphasis,
+                   contnode: Node = None, env: BuildEnvironment = None) -> Node:
+         result = super().make_xref(rolename, domain, target,  # type: ignore
+                                    innernode, contnode, env)
+-        result['refspecific'] = True
++        if rolename == 'class':
++            if env:
++                result['py:module'] = env.ref_context.get('py:module')
++                result['py:class'] = env.ref_context.get('py:class')
++            result.attributes.pop('refspecific', None)
++        else:
++            result['refspecific'] = True
+         if target.startswith(('.', '~')):
+             prefix, result['reftarget'] = target[0], target[1:]
+             if prefix == '.':
++                result['refspecific'] = True
+                 text = target[1:]
+             elif prefix == '~':
+                 text = target.split('.')[-1]

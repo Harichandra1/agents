@@ -1,0 +1,41 @@
+diff --git a/django/db/backends/ddl_references.py b/django/db/backends/ddl_references.py
+index 44e49806f8..873f4fc790 100644
+--- a/django/db/backends/ddl_references.py
++++ b/django/db/backends/ddl_references.py
+@@ -81,12 +81,16 @@ class Columns(TableColumns):
+         self.col_suffixes = col_suffixes
+         super().__init__(table, columns)
+ 
++    def _get_col_suffix(self, idx):
++        try:
++            suffix = self.col_suffixes[idx]
++        except IndexError:
++            return ''
++        return '' if suffix == '' else ' ' + suffix
++
+     def __str__(self):
+         def col_str(column, idx):
+-            try:
+-                return self.quote_name(column) + self.col_suffixes[idx]
+-            except IndexError:
+-                return self.quote_name(column)
++            return self.quote_name(column) + self._get_col_suffix(idx)
+ 
+         return ', '.join(col_str(column, idx) for idx, column in enumerate(self.columns))
+ 
+@@ -114,10 +118,12 @@ class IndexColumns(Columns):
+             # length as self.columns.
+             col = '{} {}'.format(self.quote_name(column), self.opclasses[idx])
+             try:
+-                col = '{} {}'.format(col, self.col_suffixes[idx])
++                suffix = self.col_suffixes[idx]
+             except IndexError:
+-                pass
+-            return col
++                return col
++            if suffix == '':
++                return col
++            return '{} {}'.format(col, suffix)
+ 
+         return ', '.join(col_str(column, idx) for idx, column in enumerate(self.columns))
+ 

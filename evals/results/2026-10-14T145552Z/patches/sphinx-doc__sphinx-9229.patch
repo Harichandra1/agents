@@ -1,0 +1,54 @@
+diff --git a/sphinx/ext/autodoc/__init__.py b/sphinx/ext/autodoc/__init__.py
+index 1f4c98284..3bf392afb 100644
+--- a/sphinx/ext/autodoc/__init__.py
++++ b/sphinx/ext/autodoc/__init__.py
+@@ -1724,10 +1724,12 @@ class ClassDocumenter(DocstringSignatureMixin, ModuleLevelDocumenter):  # type:
+     def add_content(self, more_content: Optional[StringList], no_docstring: bool = False
+                     ) -> None:
+         if self.doc_as_attr:
+-            try:
+-                more_content = StringList([_('alias of %s') % restify(self.object)], source='')
+-            except AttributeError:
+-                pass  # Invalid class object is passed.
++            key = ('.'.join(self.objpath[:-1]), self.objpath[-1])
++            if not self.analyzer or key not in self.analyzer.find_attr_docs():
++                try:
++                    more_content = StringList([_('alias of %s') % restify(self.object)], source='')
++                except AttributeError:
++                    pass  # Invalid class object is passed.
+ 
+         super().add_content(more_content)
+ 
+diff --git a/tests/roots/test-ext-autodoc/target/classes.py b/tests/roots/test-ext-autodoc/target/classes.py
+index a3b4c6477..4520367e9 100644
+--- a/tests/roots/test-ext-autodoc/target/classes.py
++++ b/tests/roots/test-ext-autodoc/target/classes.py
+@@ -30,3 +30,6 @@ class Quux(List[Union[int, float]]):
+ 
+ 
+ Alias = Foo
++
++AliasWithDoccomment = Foo
++"""A class alias with a doccomment."""
+diff --git a/tests/test_ext_autodoc_autoclass.py b/tests/test_ext_autodoc_autoclass.py
+index 096dc9397..41af10f56 100644
+--- a/tests/test_ext_autodoc_autoclass.py
++++ b/tests/test_ext_autodoc_autoclass.py
+@@ -311,6 +311,17 @@ def test_class_doc_from_both(app):
+     ]
+ 
+ 
++def test_class_alias_having_doccomment(app):
++    actual = do_autodoc(app, 'class', 'target.classes.AliasWithDoccomment')
++    assert list(actual) == [
++        '',
++        '.. py:attribute:: AliasWithDoccomment',
++        '   :module: target.classes',
++        '',
++        '   A class alias with a doccomment.',
++    ]
++
++
+ def test_class_alias(app):
+     def autodoc_process_docstring(*args):
+         """A handler always raises an error.

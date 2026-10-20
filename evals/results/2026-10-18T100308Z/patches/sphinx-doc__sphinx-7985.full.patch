@@ -1,0 +1,104 @@
+diff --git a/doc/man/sphinx-build.rst b/doc/man/sphinx-build.rst
+index 1ef0e07dc..0ecbae021 100644
+--- a/doc/man/sphinx-build.rst
++++ b/doc/man/sphinx-build.rst
+@@ -77,7 +77,8 @@ Options
+       extension is enabled.
+ 
+    **linkcheck**
+-      Check the integrity of all external links.
++      Check the integrity of all external links and local links to files in the
++      source tree.
+ 
+    **xml**
+      Build Docutils-native XML files.
+diff --git a/doc/usage/builders/index.rst b/doc/usage/builders/index.rst
+index db6706944..e9b91725d 100644
+--- a/doc/usage/builders/index.rst
++++ b/doc/usage/builders/index.rst
+@@ -429,7 +429,8 @@ name is ``rinoh``. Refer to the `rinohtype manual`_ for details.
+ .. class:: CheckExternalLinksBuilder
+ 
+    This builder scans all documents for external links, tries to open them with
+-   ``requests``, and writes an overview which ones are broken and redirected to
++   ``requests``, and checks that local links point to existing files in the
++   source tree.  It writes an overview which links are broken and redirected to
+    standard output and to :file:`output.txt` in the output directory.
+ 
+    .. autoattribute:: name
+diff --git a/sphinx/builders/linkcheck.py b/sphinx/builders/linkcheck.py
+index dd5317087..492fd8b4e 100644
+--- a/sphinx/builders/linkcheck.py
++++ b/sphinx/builders/linkcheck.py
+@@ -77,7 +77,7 @@ def check_anchor(response: requests.requests.Response, anchor: str) -> bool:
+ 
+ class CheckExternalLinksBuilder(Builder):
+     """
+-    Checks for broken external links.
++    Checks for broken external and local links.
+     """
+     name = 'linkcheck'
+     epilog = __('Look for any errors in the above output or in '
+@@ -212,8 +212,6 @@ class CheckExternalLinksBuilder(Builder):
+             # check for various conditions without bothering the network
+             if len(uri) == 0 or uri.startswith(('#', 'mailto:', 'ftp:')):
+                 return 'unchecked', '', 0
+-            elif not uri.startswith(('http:', 'https:')):
+-                return 'local', '', 0
+             elif uri in self.good:
+                 return 'working', 'old', 0
+             elif uri in self.broken:
+@@ -224,6 +222,31 @@ class CheckExternalLinksBuilder(Builder):
+                 if rex.match(uri):
+                     return 'ignored', '', 0
+ 
++            if not uri.startswith(('http:', 'https:')):
++                # Local links refer to files in the source tree.  Links with a
++                # URI scheme (or a network location) are not filesystem paths,
++                # and retain the previous local-link behavior.
++                try:
++                    parsed = urlparse(uri)
++                except ValueError:
++                    # Preserve the previous handling for malformed URI syntax.
++                    return 'local', '', 0
++                if parsed.scheme or parsed.netloc or not parsed.path:
++                    return 'local', '', 0
++
++                _, filename = self.env.relfn2path(unquote(parsed.path), docname)
++                srcdir = path.abspath(self.srcdir)
++                filename = path.abspath(filename)
++                try:
++                    is_in_srcdir = path.commonpath([srcdir, filename]) == srcdir
++                    exists = path.exists(filename)
++                except (OSError, ValueError):
++                    is_in_srcdir = False
++                    exists = False
++                if not is_in_srcdir or not exists:
++                    return 'broken', __('Local file not found'), 0
++                return 'local', '', 0
++
+             # need to actually check the URI
+             for _ in range(self.app.config.linkcheck_retries):
+                 status, info, code = check_uri()
+@@ -256,6 +279,8 @@ class CheckExternalLinksBuilder(Builder):
+         if status == 'unchecked':
+             self.write_linkstat(linkstat)
+             return
++        if status == 'broken':
++            self.app.statuscode = 1
+         if status == 'working' and info == 'old':
+             self.write_linkstat(linkstat)
+             return
+diff --git a/sphinx/cmd/make_mode.py b/sphinx/cmd/make_mode.py
+index aff2ea7f5..199b01e38 100644
+--- a/sphinx/cmd/make_mode.py
++++ b/sphinx/cmd/make_mode.py
+@@ -47,7 +47,7 @@ BUILDERS = [
+     ("",      "changes",     "to make an overview of all changed/added/deprecated items"),
+     ("",      "xml",         "to make Docutils-native XML files"),
+     ("",      "pseudoxml",   "to make pseudoxml-XML files for display purposes"),
+-    ("",      "linkcheck",   "to check all external links for integrity"),
++    ("",      "linkcheck",   "to check external and local links for integrity"),
+     ("",      "doctest",     "to run all doctests embedded in the documentation "
+                              "(if enabled)"),
+     ("",      "coverage",    "to run coverage check of the documentation (if enabled)"),

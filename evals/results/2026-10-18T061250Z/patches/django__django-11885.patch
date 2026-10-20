@@ -1,0 +1,73 @@
+diff --git a/django/db/models/deletion.py b/django/db/models/deletion.py
+index ae82d26340..4ca0963061 100644
+--- a/django/db/models/deletion.py
++++ b/django/db/models/deletion.py
+@@ -70,6 +70,7 @@ class Collector:
+         # fast_deletes is a list of queryset-likes that can be deleted without
+         # fetching the objects into memory.
+         self.fast_deletes = []
++        self._fast_delete_signatures = []
+ 
+         # Tracks deletion-order dependency for databases without transactions
+         # or ability to defer constraint checks. Only concrete model classes
+@@ -117,6 +118,42 @@ class Collector:
+             model, {}).setdefault(
+             (field, value), set()).update(objs)
+ 
++    def add_fast_delete(self, queryset):
++        """Combine fast-delete querysets for the same model where possible."""
++        def signature(node):
++            if hasattr(node, 'children'):
++                return (
++                    node.connector, node.negated,
++                    tuple(signature(child) for child in node.children),
++                )
++            lhs = getattr(node, 'lhs', None)
++            return (
++                type(node), getattr(lhs, 'alias', None),
++                getattr(lhs, 'target', None), getattr(node, 'lookup_name', None),
++            )
++
++        queryset_signature = signature(queryset.query.where)
++        for i, qs in enumerate(self.fast_deletes):
++            if qs.model != queryset.model or qs.db != queryset.db:
++                continue
++            # Don't combine successive batches of the same relationship. Apart
++            # from avoiding oversized queries, this preserves batching for
++            # databases with limits on the number of query parameters.
++            if queryset_signature in self._fast_delete_signatures[i]:
++                continue
++            combined_query = qs.query.clone()
++            try:
++                combined_query.combine(queryset.query, sql.OR)
++            except (AssertionError, ValueError):
++                # Some querysets cannot be combined (for example, a sliced
++                # queryset). Leave them as separate deletes in that case.
++                continue
++            qs.query = combined_query
++            self._fast_delete_signatures[i].add(queryset_signature)
++            return
++        self.fast_deletes.append(queryset)
++        self._fast_delete_signatures.append({queryset_signature})
++
+     def _has_signal_listeners(self, model):
+         return (
+             signals.pre_delete.has_listeners(model) or
+@@ -191,7 +228,7 @@ class Collector:
+         If 'keep_parents' is True, data of parent model's will be not deleted.
+         """
+         if self.can_fast_delete(objs):
+-            self.fast_deletes.append(objs)
++            self.add_fast_delete(objs)
+             return
+         new_objs = self.add(objs, source, nullable,
+                             reverse_dependency=reverse_dependency)
+@@ -225,7 +262,7 @@ class Collector:
+                 for batch in batches:
+                     sub_objs = self.related_objects(related, batch)
+                     if self.can_fast_delete(sub_objs, from_field=field):
+-                        self.fast_deletes.append(sub_objs)
++                        self.add_fast_delete(sub_objs)
+                     else:
+                         related_model = related.related_model
+                         # Non-referenced fields can be deferred if no signal

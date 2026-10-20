@@ -1,0 +1,116 @@
+diff --git a/doc/usage/configuration.rst b/doc/usage/configuration.rst
+index eba6904c4..c257a066b 100644
+--- a/doc/usage/configuration.rst
++++ b/doc/usage/configuration.rst
+@@ -2447,6 +2447,15 @@ Options for the linkcheck builder
+ 
+    .. versionadded:: 1.1
+ 
++.. confval:: linkcheck_check_local
++
++   If true, check that local links point to files or documents in the source
++   directory. Links to Sphinx documents are checked against their source files.
++   This can be disabled if additional files are added to the output by a
++   deployment process. The default is ``True``.
++
++   .. versionadded:: 3.2
++
+ .. confval:: linkcheck_anchors
+ 
+    If true, check the validity of ``#anchor``\ s in links. Since this requires
+diff --git a/sphinx/builders/linkcheck.py b/sphinx/builders/linkcheck.py
+index dd5317087..396438363 100644
+--- a/sphinx/builders/linkcheck.py
++++ b/sphinx/builders/linkcheck.py
+@@ -16,7 +16,7 @@ import threading
+ from html.parser import HTMLParser
+ from os import path
+ from typing import Any, Dict, List, Set, Tuple
+-from urllib.parse import unquote, urlparse
++from urllib.parse import unquote, urlparse, urlsplit
+ 
+ from docutils import nodes
+ from docutils.nodes import Node
+@@ -109,6 +109,41 @@ class CheckExternalLinksBuilder(Builder):
+             thread.start()
+             self.workers.append(thread)
+ 
++    def check_local_uri(self, uri: str, docname: str) -> bool:
++        """Check whether a local URI refers to a document or file in srcdir."""
++        try:
++            parsed = urlsplit(uri)
++        except ValueError:
++            # Preserve the old local-link handling for malformed URIs.
++            return True
++        if parsed.scheme or parsed.netloc or not parsed.path:
++            return True
++
++        target = unquote(parsed.path)
++        relative_path, target_path = self.env.relfn2path(target, docname)
++        srcdir = path.abspath(self.srcdir)
++        try:
++            if path.commonpath((srcdir, target_path)) != srcdir:
++                return True
++        except ValueError:
++            return True
++
++        if path.exists(target_path):
++            return True
++
++        # Links to Sphinx documents normally point to the generated HTML file,
++        # which does not exist during a linkcheck build.  Match those links to
++        # their source documents instead.
++        suffix = path.splitext(relative_path)[1]
++        html_suffix = self.config.html_file_suffix or '.html'
++        if suffix and suffix != html_suffix:
++            return False
++
++        target_docname = path.splitext(relative_path)[0].replace(path.sep, '/')
++        if parsed.path.endswith('/'):
++            target_docname = path.join(target_docname, 'index').replace(path.sep, '/')
++        return target_docname in self.env.found_docs
++
+     def check_thread(self) -> None:
+         kwargs = {
+             'allow_redirects': True,
+@@ -212,7 +247,13 @@ class CheckExternalLinksBuilder(Builder):
+             # check for various conditions without bothering the network
+             if len(uri) == 0 or uri.startswith(('#', 'mailto:', 'ftp:')):
+                 return 'unchecked', '', 0
+-            elif not uri.startswith(('http:', 'https:')):
++            for rex in self.to_ignore:
++                if rex.match(uri):
++                    return 'ignored', '', 0
++            if not uri.startswith(('http:', 'https:')):
++                if (self.config.linkcheck_check_local and
++                        not self.check_local_uri(uri, docname)):
++                    return 'broken', __('Local file not found'), 0
+                 return 'local', '', 0
+             elif uri in self.good:
+                 return 'working', 'old', 0
+@@ -220,9 +261,6 @@ class CheckExternalLinksBuilder(Builder):
+                 return 'broken', self.broken[uri], 0
+             elif uri in self.redirected:
+                 return 'redirected', self.redirected[uri][0], self.redirected[uri][1]
+-            for rex in self.to_ignore:
+-                if rex.match(uri):
+-                    return 'ignored', '', 0
+ 
+             # need to actually check the URI
+             for _ in range(self.app.config.linkcheck_retries):
+@@ -275,6 +313,7 @@ class CheckExternalLinksBuilder(Builder):
+             logger.info(darkgreen('ok        ') + uri + info)
+             self.write_linkstat(linkstat)
+         elif status == 'broken':
++            self.app.statuscode = 1
+             if self.app.quiet or self.app.warningiserror:
+                 logger.warning(__('broken link: %s (%s)'), uri, info,
+                                location=(filename, lineno))
+@@ -361,6 +400,7 @@ def setup(app: Sphinx) -> Dict[str, Any]:
+     app.add_config_value('linkcheck_retries', 1, None)
+     app.add_config_value('linkcheck_timeout', None, None, [int])
+     app.add_config_value('linkcheck_workers', 5, None)
++    app.add_config_value('linkcheck_check_local', True, None)
+     app.add_config_value('linkcheck_anchors', True, None)
+     # Anchors starting with ! are ignored since they are
+     # commonly used for dynamic pages

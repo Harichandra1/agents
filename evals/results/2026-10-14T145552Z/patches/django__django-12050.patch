@@ -1,0 +1,30 @@
+diff --git a/django/db/models/sql/query.py b/django/db/models/sql/query.py
+index ea51912e8b..90475d6fb9 100644
+--- a/django/db/models/sql/query.py
++++ b/django/db/models/sql/query.py
+@@ -1073,7 +1073,7 @@ class Query(BaseExpression):
+                         ))
+                 else:
+                     resolved_values.append(sub_value)
+-            value = tuple(resolved_values)
++            value = type(value)(resolved_values)
+         return value
+ 
+     def solve_lookup_type(self, lookup):
+diff --git a/tests/queries/test_query.py b/tests/queries/test_query.py
+index f0d3a6260a..03b1b0364b 100644
+--- a/tests/queries/test_query.py
++++ b/tests/queries/test_query.py
+@@ -15,6 +15,12 @@ from .models import Author, Item, ObjectC, Ranking
+ 
+ 
+ class TestQuery(SimpleTestCase):
++    def test_iterable_lookup_value(self):
++        query = Query(Author)
++        value = [1, 2]
++        where = query.build_where(Q(num=value))
++        self.assertIsInstance(where.children[0].rhs, list)
++
+     def test_simple_query(self):
+         query = Query(Author)
+         where = query.build_where(Q(num__gt=2))

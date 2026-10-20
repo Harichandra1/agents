@@ -1,0 +1,48 @@
+diff --git a/sphinx/domains/python.py b/sphinx/domains/python.py
+index 79d7e4f46..95ff2d07c 100644
+--- a/sphinx/domains/python.py
++++ b/sphinx/domains/python.py
+@@ -1191,6 +1191,10 @@ class PythonDomain(Domain):
+     def objects(self) -> Dict[str, ObjectEntry]:
+         return self.data.setdefault('objects', {})  # fullname -> ObjectEntry
+ 
++    def process_field_xref(self, pnode: pending_xref) -> None:
++        pnode['py:module'] = self.env.ref_context.get('py:module')
++        pnode['py:class'] = self.env.ref_context.get('py:class')
++
+     def note_object(self, name: str, objtype: str, node_id: str, location: Any = None) -> None:
+         """Note a python object for cross reference.
+ 
+diff --git a/tests/test_domain_py.py b/tests/test_domain_py.py
+index 2dc97bed9..a292fb0a5 100644
+--- a/tests/test_domain_py.py
++++ b/tests/test_domain_py.py
+@@ -206,6 +206,28 @@ def test_domain_py_find_obj(app, status, warning):
+               ('roles', 'NestedParentA.NestedChildA.subchild_1', 'method'))])
+ 
+ 
++@pytest.mark.sphinx(freshenv=True)
++def test_info_field_list(app):
++    text = (".. py:class:: mod.A\n"
++            ".. py:class:: mod.submod.A\n"
++            ".. py:currentmodule:: mod.submod\n"
++            ".. py:function:: f()\n"
++            "   :param A a: parameter\n"
++            "   :rtype: A\n")
++    doctree = restructuredtext.parse(app, text)
++
++    refs = list(doctree.traverse(pending_xref))
++    assert len(refs) == 2
++    domain = app.env.get_domain('py')
++    for ref in refs:
++        assert ref['py:module'] == 'mod.submod'
++        assert ref['py:class'] is None
++        assert ref['refspecific'] is True
++        assert domain.find_obj(app.env, ref['py:module'], ref['py:class'],
++                               ref['reftarget'], 'class', 1) == [
++                                   ('mod.submod.A', domain.objects['mod.submod.A'])]
++
++
+ def test_get_full_qualified_name():
+     env = Mock(domaindata={})
+     domain = PythonDomain(env)

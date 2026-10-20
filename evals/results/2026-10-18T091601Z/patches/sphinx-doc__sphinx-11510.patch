@@ -1,0 +1,79 @@
+diff --git a/doc/extdev/appapi.rst b/doc/extdev/appapi.rst
+index 78e88b063..82e4b07f6 100644
+--- a/doc/extdev/appapi.rst
++++ b/doc/extdev/appapi.rst
+@@ -253,6 +253,9 @@ Here is a more detailed list of these events.
+    Emitted when a source file has been read.  The *source* argument is a list
+    whose single element is the contents of the source file.  You can process the
+    contents and replace this item to implement source-level transformations.
++   When the ``include`` directive inserts reStructuredText into the parser
++   input, the event is also emitted with the docname of the containing document
++   and the included source text.
+ 
+    For example, if you want to use ``$`` signs to delimit inline math, like in
+    LaTeX, you can use a regular expression to replace ``$...$`` by
+diff --git a/sphinx/directives/other.py b/sphinx/directives/other.py
+index 19f7c0a8d..a75cd7dd9 100644
+--- a/sphinx/directives/other.py
++++ b/sphinx/directives/other.py
+@@ -3,7 +3,7 @@ from __future__ import annotations
+ import re
+ from typing import TYPE_CHECKING, Any, cast
+ 
+-from docutils import nodes
++from docutils import nodes, statemachine
+ from docutils.parsers.rst import directives
+ from docutils.parsers.rst.directives.admonitions import BaseAdmonition
+ from docutils.parsers.rst.directives.misc import Class
+@@ -372,11 +372,49 @@ class Include(BaseInclude, SphinxDirective):
+         if self.arguments[0].startswith('<') and \
+            self.arguments[0].endswith('>'):
+             # docutils "standard" includes, do not do path processing
+-            return super().run()
++            return self._run_with_source_read()
+         rel_filename, filename = self.env.relfn2path(self.arguments[0])
+         self.arguments[0] = filename
+         self.env.note_included(filename)
+-        return super().run()
++        return self._run_with_source_read()
++
++    def _run_with_source_read(self) -> list[Node]:
++        """Emit ``source-read`` for included reStructuredText source."""
++        state_machine = self.state_machine
++        insert_input = state_machine.insert_input
++
++        def insert_input_with_source_read(include_lines: list[str], source: str) -> None:
++            # The docutils Include directive adds these lines to delimit the
++            # included source in the input stream.  They are not part of the
++            # source passed to source-read handlers.
++            end_marker = '.. end of inclusion from "%s"' % source
++            suffix: list[str] = []
++            if len(include_lines) >= 2 and include_lines[-2:] == ['', end_marker]:
++                include_lines, suffix = include_lines[:-2], include_lines[-2:]
++
++            source_text = '\n'.join(include_lines)
++            if include_lines:
++                # Recreate a trailing newline for source-read handlers.  The
++                # docutils line list does not retain whether the file ended
++                # with one, but this is the usual form for source files.
++                source_text += '\n'
++            arg = [source_text]
++            self.env.events.emit('source-read', self.env.docname, arg)
++            # Keep the original input if an event handler returns no text or
++            # a non-text value; included content must remain parseable.
++            if arg and isinstance(arg[0], str) and arg[0] != source_text:
++                tab_width = self.options.get(
++                    'tab-width', self.state.document.settings.tab_width)
++                include_lines = statemachine.string2lines(
++                    arg[0], tab_width, convert_whitespace=True)
++            include_lines += suffix
++            insert_input(include_lines, source)
++
++        state_machine.insert_input = insert_input_with_source_read
++        try:
++            return super().run()
++        finally:
++            state_machine.insert_input = insert_input
+ 
+ 
+ def setup(app: Sphinx) -> dict[str, Any]:

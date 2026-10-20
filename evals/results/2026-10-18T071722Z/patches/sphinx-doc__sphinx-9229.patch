@@ -1,0 +1,45 @@
+diff --git a/sphinx/ext/autodoc/__init__.py b/sphinx/ext/autodoc/__init__.py
+index 1f4c98284..70f36f1ef 100644
+--- a/sphinx/ext/autodoc/__init__.py
++++ b/sphinx/ext/autodoc/__init__.py
+@@ -1724,10 +1724,16 @@ class ClassDocumenter(DocstringSignatureMixin, ModuleLevelDocumenter):  # type:
+     def add_content(self, more_content: Optional[StringList], no_docstring: bool = False
+                     ) -> None:
+         if self.doc_as_attr:
+-            try:
+-                more_content = StringList([_('alias of %s') % restify(self.object)], source='')
+-            except AttributeError:
+-                pass  # Invalid class object is passed.
++            # A class alias may have a docstring-comment in the module source.
++            # In that case the comment is added by Documenter.add_content(), and
++            # should take precedence over the generated alias description.
++            key = ('.'.join(self.objpath[:-1]), self.objpath[-1])
++            if not self.analyzer or key not in self.analyzer.find_attr_docs():
++                try:
++                    more_content = StringList([_('alias of %s') % restify(self.object)],
++                                              source='')
++                except AttributeError:
++                    pass  # Invalid class object is passed.
+ 
+         super().add_content(more_content)
+ 
+@@ -2015,7 +2021,8 @@ class DataDocumenter(GenericAliasMixin, NewTypeMixin, TypeVarMixin,
+         if not more_content:
+             more_content = StringList()
+ 
+-        self.update_content(more_content)
++        if not self.get_doc():
++            self.update_content(more_content)
+         super().add_content(more_content, no_docstring=no_docstring)
+ 
+ 
+@@ -2595,7 +2602,8 @@ class AttributeDocumenter(GenericAliasMixin, NewTypeMixin, SlotsMixin,  # type:
+ 
+         if more_content is None:
+             more_content = StringList()
+-        self.update_content(more_content)
++        if not self.get_doc():
++            self.update_content(more_content)
+         super().add_content(more_content, no_docstring)
+ 
+ 

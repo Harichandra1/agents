@@ -1,0 +1,28 @@
+diff --git a/django/forms/models.py b/django/forms/models.py
+index dafc11f995..80ab8cd716 100644
+--- a/django/forms/models.py
++++ b/django/forms/models.py
+@@ -13,7 +13,7 @@ from django.forms.forms import BaseForm, DeclarativeFieldsMetaclass
+ from django.forms.formsets import BaseFormSet, formset_factory
+ from django.forms.utils import ErrorList
+ from django.forms.widgets import (
+-    HiddenInput, MultipleHiddenInput, SelectMultiple,
++    HiddenInput, MultipleHiddenInput, RadioSelect, SelectMultiple,
+ )
+ from django.utils.text import capfirst, get_text_list
+ from django.utils.translation import gettext, gettext_lazy as _
+@@ -1185,7 +1185,13 @@ class ModelChoiceField(ChoiceField):
+                  required=True, widget=None, label=None, initial=None,
+                  help_text='', to_field_name=None, limit_choices_to=None,
+                  **kwargs):
+-        if required and (initial is not None):
++        widget = widget or self.widget
++        if isinstance(widget, type):
++            is_radioselect = issubclass(widget, RadioSelect)
++        else:
++            is_radioselect = isinstance(widget, RadioSelect)
++        if required and (initial is not None or
++                         (is_radioselect and not widget.allow_multiple_selected)):
+             self.empty_label = None
+         else:
+             self.empty_label = empty_label

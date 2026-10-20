@@ -1,0 +1,102 @@
+diff --git a/sphinx/domains/python.py b/sphinx/domains/python.py
+index 79d7e4f46..1cb9b15f4 100644
+--- a/sphinx/domains/python.py
++++ b/sphinx/domains/python.py
+@@ -271,10 +271,10 @@ class PyXrefMixin:
+                   contnode: Node = None, env: BuildEnvironment = None) -> Node:
+         result = super().make_xref(rolename, domain, target,  # type: ignore
+                                    innernode, contnode, env)
+-        result['refspecific'] = True
+         if target.startswith(('.', '~')):
+             prefix, result['reftarget'] = target[0], target[1:]
+             if prefix == '.':
++                result['refspecific'] = True
+                 text = target[1:]
+             elif prefix == '~':
+                 text = target.split('.')[-1]
+@@ -1187,6 +1187,10 @@ class PythonDomain(Domain):
+         PythonModuleIndex,
+     ]
+ 
++    def process_field_xref(self, pnode: pending_xref) -> None:
++        pnode['py:module'] = self.env.ref_context.get('py:module')
++        pnode['py:class'] = self.env.ref_context.get('py:class')
++
+     @property
+     def objects(self) -> Dict[str, ObjectEntry]:
+         return self.data.setdefault('objects', {})  # fullname -> ObjectEntry
+diff --git a/tests/roots/test-domain-py-info-fields/conf.py b/tests/roots/test-domain-py-info-fields/conf.py
+new file mode 100644
+index 000000000..2db221cc6
+--- /dev/null
++++ b/tests/roots/test-domain-py-info-fields/conf.py
+@@ -0,0 +1 @@
++nitpicky = True
+diff --git a/tests/roots/test-domain-py-info-fields/index.rst b/tests/roots/test-domain-py-info-fields/index.rst
+new file mode 100644
+index 000000000..8dd39bc70
+--- /dev/null
++++ b/tests/roots/test-domain-py-info-fields/index.rst
+@@ -0,0 +1,35 @@
++Info field cross-references
++===========================
++
++.. py:class:: mod.A
++.. py:class:: mod.submod.A
++.. py:class:: mod.Other
++
++.. py:currentmodule:: mod
++
++.. py:function:: g()
++
++   - :py:class:`A`
++
++   :param A a:
++   :param b: Description for b.
++   :type b: A
++   :rtype: A
++
++.. py:currentmodule:: mod.submod
++
++.. py:function:: f()
++
++   - :py:class:`A`
++
++   :param A a:
++   :param b: Description for b.
++   :type b: A
++   :rtype: A
++
++.. py:currentmodule:: None
++
++.. py:function:: g()
++
++   :param Other a:
++   :rtype: Other
+diff --git a/tests/test_domain_py.py b/tests/test_domain_py.py
+index 2dc97bed9..9c11518d9 100644
+--- a/tests/test_domain_py.py
++++ b/tests/test_domain_py.py
+@@ -132,6 +132,22 @@ def test_domain_py_xrefs(app, status, warning):
+     assert len(refnodes) == 2
+ 
+ 
++@pytest.mark.sphinx('html', testroot='domain-py-info-fields')
++def test_info_field_xrefs_use_module_context(app, warning):
++    app.builder.build_all()
++
++    warnings = warning.getvalue()
++    assert 'more than one target found' not in warnings
++    assert warnings.count('py:class reference target not found: Other') == 2
++
++    html = (app.outdir / 'index.html').read_text()
++    # Each module has one definition, one explicit xref, and :param:, :type: and :rtype: xrefs.
++    assert html.count('href="#mod.A"') == 5
++    assert html.count('href="#mod.submod.A"') == 5
++    # In non-module scope, don't fuzzy-match the class from another module.
++    assert html.count('href="#mod.Other"') == 1
++
++
+ @pytest.mark.sphinx('dummy', testroot='domain-py')
+ def test_domain_py_objects(app, status, warning):
+     app.builder.build_all()

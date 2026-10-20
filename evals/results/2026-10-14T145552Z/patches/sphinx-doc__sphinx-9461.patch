@@ -1,0 +1,155 @@
+diff --git a/sphinx/domains/python.py b/sphinx/domains/python.py
+index d79de154e..00a9cb4a1 100644
+--- a/sphinx/domains/python.py
++++ b/sphinx/domains/python.py
+@@ -852,6 +852,7 @@ class PyProperty(PyObject):
+     option_spec = PyObject.option_spec.copy()
+     option_spec.update({
+         'abstractmethod': directives.flag,
++        'classmethod': directives.flag,
+         'type': directives.unchanged,
+     })
+ 
+@@ -868,6 +869,8 @@ class PyProperty(PyObject):
+         prefix = ['property']
+         if 'abstractmethod' in self.options:
+             prefix.insert(0, 'abstract')
++        if 'classmethod' in self.options:
++            prefix.insert(0, 'classmethod')
+ 
+         return ' '.join(prefix) + ' '
+ 
+diff --git a/sphinx/ext/autodoc/__init__.py b/sphinx/ext/autodoc/__init__.py
+index 1cecb1f79..71543348d 100644
+--- a/sphinx/ext/autodoc/__init__.py
++++ b/sphinx/ext/autodoc/__init__.py
+@@ -2663,6 +2663,17 @@ class PropertyDocumenter(DocstringStripSignatureMixin, ClassLevelDocumenter):  #
+                             ) -> bool:
+         return inspect.isproperty(member) and isinstance(parent, ClassDocumenter)
+ 
++    def import_object(self, raiseerror: bool = False) -> bool:
++        ret = super().import_object(raiseerror)
++        if ret and self.parent:
++            for cls in inspect.getmro(self.parent):
++                descriptor = cls.__dict__.get(self.object_name)
++                if (isinstance(descriptor, classmethod) and
++                        isinstance(descriptor.__func__, property)):
++                    self.object = descriptor.__func__
++                    break
++        return ret
++
+     def document_members(self, all_members: bool = False) -> None:
+         pass
+ 
+@@ -2676,6 +2687,11 @@ class PropertyDocumenter(DocstringStripSignatureMixin, ClassLevelDocumenter):  #
+         if inspect.isabstractmethod(self.object):
+             self.add_line('   :abstractmethod:', sourcename)
+ 
++        if any(isinstance(cls.__dict__.get(self.object_name), classmethod) and
++               isinstance(cls.__dict__[self.object_name].__func__, property)
++               for cls in inspect.getmro(self.parent)):
++            self.add_line('   :classmethod:', sourcename)
++
+         if safe_getattr(self.object, 'fget', None) and self.config.autodoc_typehints != 'none':
+             try:
+                 signature = inspect.signature(self.object.fget,
+diff --git a/sphinx/ext/autodoc/importer.py b/sphinx/ext/autodoc/importer.py
+index 1a8ea0973..58f291926 100644
+--- a/sphinx/ext/autodoc/importer.py
++++ b/sphinx/ext/autodoc/importer.py
+@@ -278,6 +278,15 @@ def get_class_members(subject: Any, objpath: List[str], attrgetter: Callable
+             if ismock(value):
+                 value = undecorate(value)
+ 
++            # Accessing a classmethod wrapping a property invokes the property
++            # on Python 3.9+, so retrieve the original descriptor instead.
++            for cls in getmro(subject):
++                descriptor = cls.__dict__.get(name)
++                if (isinstance(descriptor, classmethod) and
++                        isinstance(descriptor.__func__, property)):
++                    value = descriptor.__func__
++                    break
++
+             unmangled = unmangle(subject, name)
+             if unmangled and unmangled not in members:
+                 if name in obj_dict:
+diff --git a/tests/roots/test-ext-autodoc/target/properties.py b/tests/roots/test-ext-autodoc/target/properties.py
+index 409fc2b5d..fd75985c7 100644
+--- a/tests/roots/test-ext-autodoc/target/properties.py
++++ b/tests/roots/test-ext-autodoc/target/properties.py
+@@ -4,3 +4,9 @@ class Foo:
+     @property
+     def prop(self) -> int:
+         """docstring"""
++
++    @classmethod
++    @property
++    def class_prop(cls) -> str:
++        """class property docstring"""
++        return 'value'
+diff --git a/tests/test_domain_py.py b/tests/test_domain_py.py
+index e4fb08155..4a20c698f 100644
+--- a/tests/test_domain_py.py
++++ b/tests/test_domain_py.py
+@@ -833,6 +833,19 @@ def test_pyproperty(app):
+     assert domain.objects['Class.prop'] == ('index', 'Class.prop', 'property', False)
+ 
+ 
++def test_pyclassmethod_property(app):
++    text = (".. py:class:: Class\n"
++            "\n"
++            "   .. py:property:: prop\n"
++            "      :classmethod:\n")
++    domain = app.env.get_domain('py')
++    doctree = restructuredtext.parse(app, text)
++
++    signature = list(doctree.traverse(desc_signature))[-1]
++    assert signature.astext() == 'classmethod property prop'
++    assert domain.objects['Class.prop'] == ('index', 'Class.prop', 'property', False)
++
++
+ def test_pydecorator_signature(app):
+     text = ".. py:decorator:: deco"
+     domain = app.env.get_domain('py')
+diff --git a/tests/test_ext_autodoc_autoclass.py b/tests/test_ext_autodoc_autoclass.py
+index 59ee1a948..ccb1260d9 100644
+--- a/tests/test_ext_autodoc_autoclass.py
++++ b/tests/test_ext_autodoc_autoclass.py
+@@ -212,6 +212,14 @@ def test_properties(app):
+         '   docstring',
+         '',
+         '',
++        '   .. py:property:: Foo.class_prop',
++        '      :module: target.properties',
++        '      :classmethod:',
++        '      :type: str',
++        '',
++        '      class property docstring',
++        '',
++        '',
+         '   .. py:property:: Foo.prop',
+         '      :module: target.properties',
+         '      :type: int',
+diff --git a/tests/test_ext_autodoc_autoproperty.py b/tests/test_ext_autodoc_autoproperty.py
+index ee25aa8b7..4abf613b3 100644
+--- a/tests/test_ext_autodoc_autoproperty.py
++++ b/tests/test_ext_autodoc_autoproperty.py
+@@ -26,3 +26,18 @@ def test_properties(app):
+         '   docstring',
+         '',
+     ]
++
++
++@pytest.mark.sphinx('html', testroot='ext-autodoc')
++def test_class_properties(app):
++    actual = do_autodoc(app, 'property', 'target.properties.Foo.class_prop')
++    assert list(actual) == [
++        '',
++        '.. py:property:: Foo.class_prop',
++        '   :module: target.properties',
++        '   :classmethod:',
++        '   :type: str',
++        '',
++        '   class property docstring',
++        '',
++    ]

@@ -1,0 +1,75 @@
+diff --git a/django/contrib/admin/utils.py b/django/contrib/admin/utils.py
+index e4ddc8f017..5ee7f76081 100755
+--- a/django/contrib/admin/utils.py
++++ b/django/contrib/admin/utils.py
+@@ -396,6 +396,12 @@ def display_for_field(value, field, empty_value_display):
+         return formats.number_format(value, field.decimal_places)
+     elif isinstance(field, (models.IntegerField, models.FloatField)):
+         return formats.number_format(value)
++    elif isinstance(field, models.JSONField):
++        try:
++            return field.formfield().prepare_value(value)
++        except Exception:
++            # Preserve the previous display for values that can't be JSON-encoded.
++            return display_for_value(value, empty_value_display)
+     elif isinstance(field, models.FileField) and value:
+         return format_html('<a href="{}">{}</a>', value.url, value)
+     else:
+diff --git a/tests/admin_utils/tests.py b/tests/admin_utils/tests.py
+index 463ba9556d..3eb0486135 100755
+--- a/tests/admin_utils/tests.py
++++ b/tests/admin_utils/tests.py
+@@ -9,6 +9,7 @@ from django.contrib.admin.utils import (
+     flatten_fieldsets, label_for_field, lookup_field, quote,
+ )
+ from django.db import DEFAULT_DB_ALIAS, models
++from django.forms.fields import InvalidJSONInput
+ from django.test import SimpleTestCase, TestCase, override_settings
+ from django.utils.formats import localize
+ from django.utils.safestring import mark_safe
+@@ -176,6 +177,45 @@ class UtilsTests(SimpleTestCase):
+         display_value = display_for_field(None, models.FloatField(), self.empty_value)
+         self.assertEqual(display_value, self.empty_value)
+ 
++    def test_json_display_for_field(self):
++        field = models.JSONField()
++        self.assertEqual(
++            display_for_field({'foo': 'bar'}, field, self.empty_value),
++            '{"foo": "bar"}',
++        )
++        self.assertEqual(
++            display_for_field([1, True, None], field, self.empty_value),
++            '[1, true, null]',
++        )
++        self.assertEqual(
++            display_for_field({'foo': ['bar', {'baz': True}]}, field, self.empty_value),
++            '{"foo": ["bar", {"baz": true}]}',
++        )
++        self.assertEqual(
++            display_for_field(InvalidJSONInput('{invalid'), field, self.empty_value),
++            '{invalid',
++        )
++        self.assertEqual(display_for_field(None, field, self.empty_value), self.empty_value)
++        self.assertEqual(display_for_field('', field, self.empty_value), '""')
++        # Values that aren't serializable as JSON retain their former display.
++
++        class NonJSONValue:
++            def __str__(self):
++                return 'non-JSON value'
++
++        self.assertEqual(
++            display_for_field(NonJSONValue(), field, self.empty_value),
++            'non-JSON value',
++        )
++
++        class CustomJSONField(models.JSONField):
++            pass
++
++        self.assertEqual(
++            display_for_field({'foo': 'bar'}, CustomJSONField(), self.empty_value),
++            '{"foo": "bar"}',
++        )
++
+     def test_number_formats_display_for_field(self):
+         display_value = display_for_field(12345.6789, models.FloatField(), self.empty_value)
+         self.assertEqual(display_value, '12345.6789')

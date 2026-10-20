@@ -1,0 +1,117 @@
+diff --git a/sphinx/ext/autodoc/__init__.py b/sphinx/ext/autodoc/__init__.py
+index f8e4be999..7e99eda74 100644
+--- a/sphinx/ext/autodoc/__init__.py
++++ b/sphinx/ext/autodoc/__init__.py
+@@ -1045,6 +1045,7 @@ class DocstringSignatureMixin:
+         docstrings = self.get_doc()
+         self._new_docstrings = docstrings[:]
+         result = None
++        self._docstring_signatures = []
+         for i, doclines in enumerate(docstrings):
+             # no lines in docstring, no match
+             if not doclines:
+@@ -1062,13 +1063,32 @@ class DocstringSignatureMixin:
+                     valid_names.extend(cls.__name__ for cls in self.object.__mro__)
+             if base not in valid_names:
+                 continue
++
++            signatures = [(args, retann)]
++            for line in doclines[1:]:
++                match = py_ext_sig_re.match(line)
++                if not match:
++                    break
++                _exmod, _path, base, args, retann = match.groups()
++                if base not in valid_names:
++                    break
++                signatures.append((args, retann))
++
++            # A class docstring and its __init__ docstring are separate sources
++            # when autoclass_content is "both".  Only treat a later docstring
++            # as signatures when it contains an overload set.
++            if result is not None and len(signatures) == 1:
++                continue
++            consumed = len(signatures)
++            if result is None:
++                result = signatures[0]
++                signatures = signatures[1:]
++            self._docstring_signatures.extend(signatures)
++
+             # re-prepare docstring to ignore more leading indentation
+             tab_width = self.directive.state.document.settings.tab_width  # type: ignore
+-            self._new_docstrings[i] = prepare_docstring('\n'.join(doclines[1:]),
++            self._new_docstrings[i] = prepare_docstring('\n'.join(doclines[consumed:]),
+                                                         tabsize=tab_width)
+-            result = args, retann
+-            # don't look any further
+-            break
+         return result
+ 
+     def get_doc(self, encoding: str = None, ignore: int = None) -> List[List[str]]:
+@@ -1081,6 +1101,15 @@ class DocstringSignatureMixin:
+             return lines
+         return super().get_doc(None, ignore)  # type: ignore
+ 
++    def _format_docstring_signatures(self) -> str:
++        signatures = []
++        for args, retann in getattr(self, '_docstring_signatures', []):
++            signature = '(%s)' % args if args else ''
++            if retann:
++                signature += ' -> %s' % retann
++            signatures.append(signature)
++        return '\n'.join(signatures)
++
+     def format_signature(self, **kwargs: Any) -> str:
+         if self.args is None and self.env.config.autodoc_docstring_signature:  # type: ignore
+             # only act if a signature is not explicitly given already, and if
+@@ -1088,7 +1117,11 @@ class DocstringSignatureMixin:
+             result = self._find_signature()
+             if result is not None:
+                 self.args, self.retann = result
+-        return super().format_signature(**kwargs)  # type: ignore
++        signature = super().format_signature(**kwargs)  # type: ignore
++        extra_signatures = self._format_docstring_signatures()
++        if extra_signatures:
++            signature += '\n' + extra_signatures
++        return signature
+ 
+ 
+ class DocstringStripSignatureMixin(DocstringSignatureMixin):
+diff --git a/tests/roots/test-ext-autodoc/target/docstring_signature.py b/tests/roots/test-ext-autodoc/target/docstring_signature.py
+index 2e5499770..af469365e 100644
+--- a/tests/roots/test-ext-autodoc/target/docstring_signature.py
++++ b/tests/roots/test-ext-autodoc/target/docstring_signature.py
+@@ -5,7 +5,8 @@ class A:
+ class B:
+     """B(foo, bar)"""
+     def __init__(self):
+-        """B(foo, bar, baz)"""
++        """B(foo, bar, baz)
++        B(foo, bar, baz, qux)"""
+ 
+ 
+ class C:
+diff --git a/tests/test_ext_autodoc_configs.py b/tests/test_ext_autodoc_configs.py
+index 22558885b..ddb137d1d 100644
+--- a/tests/test_ext_autodoc_configs.py
++++ b/tests/test_ext_autodoc_configs.py
+@@ -366,6 +366,7 @@ def test_autoclass_content_and_docstring_signature_init(app):
+         '',
+         '',
+         '.. py:class:: B(foo, bar, baz)',
++        '              B(foo, bar, baz, qux)',
+         '   :module: target.docstring_signature',
+         '',
+         '',
+@@ -395,10 +396,10 @@ def test_autoclass_content_and_docstring_signature_both(app):
+         '',
+         '',
+         '.. py:class:: B(foo, bar)',
++        '              B(foo, bar, baz)',
++        '              B(foo, bar, baz, qux)',
+         '   :module: target.docstring_signature',
+         '',
+-        '   B(foo, bar, baz)',
+-        '',
+         '',
+         '.. py:class:: C(foo, bar)',
+         '   :module: target.docstring_signature',

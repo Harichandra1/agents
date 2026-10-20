@@ -1,0 +1,32 @@
+diff --git a/django/db/models/base.py b/django/db/models/base.py
+index e3b14a41a0..63a3afba4f 100644
+--- a/django/db/models/base.py
++++ b/django/db/models/base.py
+@@ -848,8 +848,13 @@ class Model(metaclass=ModelBase):
+             raise ValueError("Cannot force an update in save() with no primary key.")
+         updated = False
+         # Skip an UPDATE when adding an instance and primary key has a default.
++        # Raw saves are used by fixture loading and must retain the usual
++        # update-then-insert behavior for objects with explicit primary keys.
+         if (
++            not raw and
+             not force_insert and
++            not force_update and
++            not update_fields and
+             self._state.adding and
+             self._meta.pk.default and
+             self._meta.pk.default is not NOT_PROVIDED
+diff --git a/tests/serializers/test_natural.py b/tests/serializers/test_natural.py
+index 3b4218bcc9..2d1644f51c 100644
+--- a/tests/serializers/test_natural.py
++++ b/tests/serializers/test_natural.py
+@@ -198,6 +198,9 @@ def pk_with_default(self, format):
+     objs = list(serializers.deserialize(format, string_data))
+     self.assertEqual(len(objs), 1)
+     self.assertEqual(objs[0].object.pk, obj.pk)
++    objs[0].object.name = 'updated'
++    objs[0].save()
++    self.assertEqual(NaturalPKWithDefault.objects.get(pk=obj.pk).name, 'updated')
+ 
+ 
+ # Dynamically register tests for each serializer

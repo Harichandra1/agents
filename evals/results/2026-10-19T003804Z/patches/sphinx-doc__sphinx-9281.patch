@@ -1,0 +1,30 @@
+diff --git a/sphinx/util/inspect.py b/sphinx/util/inspect.py
+index a415a7074..9b0d211a5 100644
+--- a/sphinx/util/inspect.py
++++ b/sphinx/util/inspect.py
+@@ -432,6 +432,25 @@ def safe_getattr(obj: Any, name: str, *defargs: Any) -> Any:
+ 
+ def object_description(object: Any) -> str:
+     """A repr() implementation that returns text safe to use in reST context."""
++    try:
++        if isenumattribute(object):
++            name = object.name
++            if name is None and isinstance(object, enum.Flag):
++                # Combined Flag values do not have a name in older versions of Python.
++                members = []
++                value = object.value
++                for member in sorted(object.__class__, key=lambda member: member.value,
++                                     reverse=True):
++                    if member.value and member.value & value == member.value:
++                        members.append(member)
++                        value &= ~member.value
++                if members and value == 0:
++                    name = '|'.join(member.name for member in members)
++            if name:
++                return '%s.%s' % (object.__class__.__name__, name)
++    except Exception:
++        # Unusual Enum subclasses may override attribute access; fall back to repr().
++        pass
+     if isinstance(object, dict):
+         try:
+             sorted_keys = sorted(object)

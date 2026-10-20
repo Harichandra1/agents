@@ -1,0 +1,36 @@
+diff --git a/django/contrib/admin/options.py b/django/contrib/admin/options.py
+index 137e6faa0f..a100f1c499 100644
+--- a/django/contrib/admin/options.py
++++ b/django/contrib/admin/options.py
+@@ -1631,7 +1631,7 @@ class ModelAdmin(BaseModelAdmin):
+ 
+     def _get_edited_object_pks(self, request, prefix):
+         """Return POST data values of list_editable primary keys."""
+-        pk_pattern = re.compile(r'{}-\d+-{}$'.format(prefix, self.model._meta.pk.name))
++        pk_pattern = re.compile(r'{}-\d+-{}$'.format(re.escape(prefix), self.model._meta.pk.name))
+         return [value for key, value in request.POST.items() if pk_pattern.match(key)]
+ 
+     def _get_list_editable_queryset(self, request, prefix):
+diff --git a/tests/admin_changelist/tests.py b/tests/admin_changelist/tests.py
+index 05490b061a..52cdf2cfa3 100644
+--- a/tests/admin_changelist/tests.py
++++ b/tests/admin_changelist/tests.py
+@@ -819,6 +819,18 @@ class ChangeListTests(TestCase):
+         pks = m._get_edited_object_pks(request, prefix='form')
+         self.assertEqual(sorted(pks), sorted([str(a.pk), str(b.pk), str(c.pk)]))
+ 
++    def test_get_list_editable_queryset_with_regex_chars_in_prefix(self):
++        swallow = Swallow.objects.create(origin='Swallow A', load=4, speed=1)
++        Swallow.objects.create(origin='Swallow B', load=2, speed=2)
++        prefix = 'form[0]+'
++        data = {'%s-0-uuid' % prefix: str(swallow.pk)}
++        request = self.factory.post('/swallow/', data=data)
++        m = SwallowAdmin(Swallow, custom_site)
++
++        queryset = m._get_list_editable_queryset(request, prefix=prefix)
++
++        self.assertEqual(list(queryset), [swallow])
++
+     def test_get_list_editable_queryset(self):
+         a = Swallow.objects.create(origin='Swallow A', load=4, speed=1)
+         Swallow.objects.create(origin='Swallow B', load=2, speed=2)

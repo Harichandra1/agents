@@ -1,0 +1,96 @@
+diff --git a/sphinx/ext/autodoc/__init__.py b/sphinx/ext/autodoc/__init__.py
+index ddfd2b365..fc856dd89 100644
+--- a/sphinx/ext/autodoc/__init__.py
++++ b/sphinx/ext/autodoc/__init__.py
+@@ -33,8 +33,8 @@ from sphinx.locale import _, __
+ from sphinx.pycode import ModuleAnalyzer, PycodeError
+ from sphinx.util import inspect, logging
+ from sphinx.util.docstrings import extract_metadata, prepare_docstring
+-from sphinx.util.inspect import (evaluate_signature, getdoc, object_description, safe_getattr,
+-                                 stringify_signature)
++from sphinx.util.inspect import (evaluate_signature, getannotations, getdoc,
++                                 object_description, safe_getattr, stringify_signature)
+ from sphinx.util.typing import get_type_hints, restify
+ from sphinx.util.typing import stringify as stringify_typehint
+ 
+@@ -2173,6 +2173,11 @@ class UninitializedInstanceAttributeMixin(DataDocumenterMixinBase):
+                         key = (qualname, self.objpath[-1])
+                         if key in analyzer.attr_docs:
+                             return list(analyzer.attr_docs[key])
++                        if (self.objpath[-1] in safe_getattr(cls, '__dict__', {}) or
++                                self.objpath[-1] in getannotations(cls)):
++                            # A definition in a derived class shadows comments
++                            # on an attribute from a base class.
++                            return None
+                 except (AttributeError, PycodeError):
+                     pass
+         except (AttributeError, PycodeError):
+@@ -2219,7 +2224,7 @@ class UninitializedInstanceAttributeMixin(DataDocumenterMixinBase):
+                 super().should_suppress_value_header())
+ 
+     def get_doc(self, encoding: str = None, ignore: int = None) -> List[List[str]]:
+-        if self.object is UNINITIALIZED_ATTR:
++        if inspect.isclass(self.parent):
+             comment = self.get_attribute_comment(self.parent)
+             if comment:
+                 return [comment]
+diff --git a/sphinx/ext/autodoc/importer.py b/sphinx/ext/autodoc/importer.py
+index d6e73d36a..ece266fba 100644
+--- a/sphinx/ext/autodoc/importer.py
++++ b/sphinx/ext/autodoc/importer.py
+@@ -14,7 +14,7 @@ import warnings
+ from typing import Any, Callable, Dict, List, Mapping, NamedTuple, Optional, Tuple
+ 
+ from sphinx.deprecation import RemovedInSphinx40Warning, deprecated_alias
+-from sphinx.pycode import ModuleAnalyzer
++from sphinx.pycode import ModuleAnalyzer, PycodeError
+ from sphinx.util import logging
+ from sphinx.util.inspect import (getannotations, getmro, getslots, isclass, isenumclass,
+                                  safe_getattr)
+@@ -307,13 +307,39 @@ def get_class_members(subject: Any, objpath: List[str], attrgetter: Callable,
+         except AttributeError:
+             pass
+ 
+-    if analyzer:
+-        # append instance attributes (cf. self.attr1) if analyzer knows
+-        namespace = '.'.join(objpath)
+-        for (ns, name), docstring in analyzer.attr_docs.items():
+-            if namespace == ns and name not in members:
+-                members[name] = ClassAttribute(subject, name, INSTANCEATTR,
+-                                               '\n'.join(docstring))
++    # Add attribute documentation from the class and its base classes.  The
++    # comments for attributes are stored by their defining class, so looking
++    # only in the analyzer for the class being documented misses inherited
++    # attributes (including instance attributes documented in __init__).
++    mro = getmro(subject)
++    for cls in mro:
++        try:
++            module = safe_getattr(cls, '__module__')
++            qualname = safe_getattr(cls, '__qualname__')
++            if analyzer and analyzer.modname == module:
++                cls_analyzer = analyzer
++            else:
++                cls_analyzer = ModuleAnalyzer.for_module(module)
++            for (namespace, name), docstring in cls_analyzer.find_attr_docs().items():
++                if namespace != qualname:
++                    continue
++
++                # Do not inherit an attribute comment through an attribute
++                # defined by a more derived class.
++                owner = next((base for base in mro
++                              if name in safe_getattr(base, '__dict__', {}) or
++                              name in getannotations(base)), None)
++                if owner is not None and mro.index(cls) > mro.index(owner):
++                    continue
++
++                if name in members:
++                    if members[name].docstring is None:
++                        members[name].docstring = '\n'.join(docstring)
++                else:
++                    members[name] = ClassAttribute(cls, name, INSTANCEATTR,
++                                                   '\n'.join(docstring))
++        except (AttributeError, PycodeError):
++            continue
+ 
+     return members
+ 

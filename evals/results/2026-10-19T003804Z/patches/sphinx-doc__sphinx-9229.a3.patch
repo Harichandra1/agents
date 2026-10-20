@@ -1,0 +1,68 @@
+diff --git a/sphinx/ext/autodoc/__init__.py b/sphinx/ext/autodoc/__init__.py
+index 1f4c98284..479c3efba 100644
+--- a/sphinx/ext/autodoc/__init__.py
++++ b/sphinx/ext/autodoc/__init__.py
+@@ -595,6 +595,18 @@ class Documenter:
+         else:
+             return 'docstring of %s' % fullname
+ 
++    def has_doc_comment(self) -> bool:
++        """Check whether the object has an attribute documentation comment."""
++        if not self.objpath:
++            return False
++
++        try:
++            analyzer = self.analyzer or ModuleAnalyzer.for_module(self.modname)
++            key = ('.'.join(self.objpath[:-1]), self.objpath[-1])
++            return key in analyzer.find_attr_docs()
++        except PycodeError:
++            return False
++
+     def add_content(self, more_content: Optional[StringList], no_docstring: bool = False
+                     ) -> None:
+         """Add content from docstrings, attribute documentation and user."""
+@@ -1724,10 +1736,13 @@ class ClassDocumenter(DocstringSignatureMixin, ModuleLevelDocumenter):  # type:
+     def add_content(self, more_content: Optional[StringList], no_docstring: bool = False
+                     ) -> None:
+         if self.doc_as_attr:
+-            try:
+-                more_content = StringList([_('alias of %s') % restify(self.object)], source='')
+-            except AttributeError:
+-                pass  # Invalid class object is passed.
++            if self.has_doc_comment():
++                more_content = StringList()
++            else:
++                try:
++                    more_content = StringList([_('alias of %s') % restify(self.object)], source='')
++                except AttributeError:
++                    pass  # Invalid class object is passed.
+ 
+         super().add_content(more_content)
+ 
+@@ -1797,7 +1812,7 @@ class GenericAliasMixin(DataDocumenterMixinBase):
+                 super().should_suppress_directive_header())
+ 
+     def update_content(self, more_content: StringList) -> None:
+-        if inspect.isgenericalias(self.object):
++        if inspect.isgenericalias(self.object) and not self.has_doc_comment():
+             more_content.append(_('alias of %s') % restify(self.object), '')
+             more_content.append('', '')
+ 
+@@ -1815,7 +1830,7 @@ class NewTypeMixin(DataDocumenterMixinBase):
+                 super().should_suppress_directive_header())
+ 
+     def update_content(self, more_content: StringList) -> None:
+-        if inspect.isNewType(self.object):
++        if inspect.isNewType(self.object) and not self.has_doc_comment():
+             supertype = restify(self.object.__supertype__)
+             more_content.append(_('alias of %s') % supertype, '')
+             more_content.append('', '')
+@@ -1848,7 +1863,7 @@ class TypeVarMixin(DataDocumenterMixinBase):
+             return super().get_doc()  # type: ignore
+ 
+     def update_content(self, more_content: StringList) -> None:
+-        if isinstance(self.object, TypeVar):
++        if isinstance(self.object, TypeVar) and not self.has_doc_comment():
+             attrs = [repr(self.object.__name__)]
+             for constraint in self.object.__constraints__:
+                 attrs.append(stringify_typehint(constraint))

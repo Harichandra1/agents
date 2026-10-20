@@ -1,0 +1,76 @@
+diff --git a/sphinx/ext/autodoc/importer.py b/sphinx/ext/autodoc/importer.py
+index 1a8ea0973..c04f8bc6f 100644
+--- a/sphinx/ext/autodoc/importer.py
++++ b/sphinx/ext/autodoc/importer.py
+@@ -9,6 +9,7 @@
+ """
+ 
+ import importlib
++import inspect
+ import traceback
+ import warnings
+ from typing import Any, Callable, Dict, List, NamedTuple, Optional, Tuple
+@@ -18,7 +19,7 @@ from sphinx.ext.autodoc.mock import ismock, undecorate
+ from sphinx.pycode import ModuleAnalyzer, PycodeError
+ from sphinx.util import logging
+ from sphinx.util.inspect import (getannotations, getmro, getslots, isclass, isenumclass,
+-                                 safe_getattr)
++                                 isproperty, safe_getattr)
+ 
+ if False:
+     # For type annotation
+@@ -59,6 +60,23 @@ def unmangle(subject: Any, name: str) -> Optional[str]:
+     return name
+ 
+ 
++def get_classmethod_property(subject: Any, name: str) -> Any:
++    """Return a property wrapped by classmethod without invoking the descriptor."""
++    if not isclass(subject):
++        return None
++
++    try:
++        value = inspect.getattr_static(subject, name)
++        if isinstance(value, classmethod) and isproperty(value.__func__):
++            return value.__func__
++    except Exception:
++        # Fall back to the normal attribute access if static lookup fails for
++        # an unusual class or descriptor.
++        pass
++
++    return None
++
++
+ def import_module(modname: str, warningiserror: bool = False) -> Any:
+     """
+     Call importlib.import_module(modname), convert exceptions to ImportError
+@@ -107,7 +125,11 @@ def import_object(modname: str, objpath: List[str], objtype: str = '',
+             parent = obj
+             logger.debug('[autodoc] getattr(_, %r)', attrname)
+             mangled_name = mangle(obj, attrname)
+-            obj = attrgetter(obj, mangled_name)
++            classmethod_property = get_classmethod_property(obj, mangled_name)
++            if classmethod_property is not None:
++                obj = classmethod_property
++            else:
++                obj = attrgetter(obj, mangled_name)
+ 
+             try:
+                 logger.debug('[autodoc] => %r', obj)
+@@ -274,7 +296,16 @@ def get_class_members(subject: Any, objpath: List[str], attrgetter: Callable
+     # other members
+     for name in dir(subject):
+         try:
+-            value = attrgetter(subject, name)
++            # A classmethod can wrap another descriptor (e.g. a property).  In this
++            # case getattr() invokes the wrapped descriptor and returns its value,
++            # rather than the descriptor itself.  Preserve the property so that
++            # autodoc can inspect and document it.
++            classmethod_property = get_classmethod_property(subject, name)
++            if classmethod_property is not None:
++                value = classmethod_property
++            else:
++                value = attrgetter(subject, name)
++
+             if ismock(value):
+                 value = undecorate(value)
+ 

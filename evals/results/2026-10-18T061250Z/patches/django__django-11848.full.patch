@@ -1,0 +1,31 @@
+diff --git a/django/utils/http.py b/django/utils/http.py
+index 572cfb4347..63524fea27 100755
+--- a/django/utils/http.py
++++ b/django/utils/http.py
+@@ -176,7 +176,10 @@ def parse_http_date(date):
+     try:
+         year = int(m.group('year'))
+         if year < 100:
+-            if year < 70:
++            if regex is RFC850_DATE:
++                now = datetime.datetime.utcnow()
++                year += now.year // 100 * 100
++            elif year < 70:
+                 year += 2000
+             else:
+                 year += 1900
+@@ -186,6 +189,14 @@ def parse_http_date(date):
+         min = int(m.group('min'))
+         sec = int(m.group('sec'))
+         result = datetime.datetime(year, month, day, hour, min, sec)
++        if regex is RFC850_DATE:
++            try:
++                fifty_years_from_now = now.replace(year=now.year + 50)
++            except ValueError:
++                # February 29th doesn't exist in every year.
++                fifty_years_from_now = now.replace(year=now.year + 50, day=28)
++            if result > fifty_years_from_now:
++                result = result.replace(year=year - 100)
+         return calendar.timegm(result.utctimetuple())
+     except Exception as exc:
+         raise ValueError("%r is not a valid date" % date) from exc

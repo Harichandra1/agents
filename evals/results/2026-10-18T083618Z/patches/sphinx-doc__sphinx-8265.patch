@@ -1,0 +1,105 @@
+diff --git a/sphinx/pycode/ast.py b/sphinx/pycode/ast.py
+index 9bafff11c..424819573 100644
+--- a/sphinx/pycode/ast.py
++++ b/sphinx/pycode/ast.py
+@@ -67,6 +67,15 @@ def unparse(node: Optional[ast.AST]) -> Optional[str]:
+     return _UnparseVisitor().visit(node)
+ 
+ 
++def unparse_default(node: Optional[ast.AST]) -> Optional[str]:
++    """Unparse a function parameter default value."""
++    if node is None:
++        return None
++    elif isinstance(node, str):
++        return node
++    return _UnparseVisitor()._visit_default(node)
++
++
+ # a greatly cut-down version of `ast._Unparser`
+ class _UnparseVisitor(ast.NodeVisitor):
+ 
+@@ -81,14 +90,29 @@ class _UnparseVisitor(ast.NodeVisitor):
+         else:
+             return node.arg
+ 
++    def _visit_default(self, default: ast.AST) -> str:
++        """Unparse a default value, preserving tuple delimiters."""
++        if isinstance(default, ast.Tuple):
++            # Tuple delimiters are optional in most contexts, but required here
++            # to distinguish a tuple default from additional arguments.
++            parenthesize_tuples = getattr(self, '_parenthesize_tuples', False)
++            self._parenthesize_tuples = True
++            try:
++                return self.visit(default)
++            finally:
++                self._parenthesize_tuples = parenthesize_tuples
++        else:
++            return self.visit(default)
++
+     def _visit_arg_with_default(self, arg: ast.arg, default: Optional[ast.AST]) -> str:
+         """Unparse a single argument to a string."""
+         name = self.visit(arg)
+         if default:
++            value = self._visit_default(default)
+             if arg.annotation:
+-                name += " = %s" % self.visit(default)
++                name += " = %s" % value
+             else:
+-                name += "=%s" % self.visit(default)
++                name += "=%s" % value
+         return name
+ 
+     def visit_arguments(self, node: ast.arguments) -> str:
+@@ -172,7 +196,12 @@ class _UnparseVisitor(ast.NodeVisitor):
+         return "%s %s" % (self.visit(node.op), self.visit(node.operand))
+ 
+     def visit_Tuple(self, node: ast.Tuple) -> str:
+-        if node.elts:
++        if getattr(self, '_parenthesize_tuples', False):
++            elements = ", ".join(self.visit(e) for e in node.elts)
++            if len(node.elts) == 1:
++                elements += ","
++            return "(%s)" % elements
++        elif node.elts:
+             return ", ".join(self.visit(e) for e in node.elts)
+         else:
+             return "()"
+diff --git a/sphinx/util/inspect.py b/sphinx/util/inspect.py
+index 378174993..03a6509db 100644
+--- a/sphinx/util/inspect.py
++++ b/sphinx/util/inspect.py
+@@ -28,6 +28,7 @@ from typing import cast
+ from sphinx.deprecation import RemovedInSphinx40Warning, RemovedInSphinx50Warning
+ from sphinx.pycode.ast import ast  # for py35-37
+ from sphinx.pycode.ast import unparse as ast_unparse
++from sphinx.pycode.ast import unparse_default as ast_unparse_default
+ from sphinx.util import logging
+ from sphinx.util.typing import ForwardRef
+ from sphinx.util.typing import stringify as stringify_annotation
+@@ -626,7 +627,7 @@ def signature_from_ast(node: ast.FunctionDef) -> inspect.Signature:
+             if defaults[i] is Parameter.empty:
+                 default = Parameter.empty
+             else:
+-                default = ast_unparse(defaults[i])
++                default = ast_unparse_default(defaults[i])
+ 
+             annotation = ast_unparse(arg.annotation) or Parameter.empty
+             params.append(Parameter(arg.arg, Parameter.POSITIONAL_ONLY,
+@@ -636,7 +637,7 @@ def signature_from_ast(node: ast.FunctionDef) -> inspect.Signature:
+         if defaults[i + posonlyargs] is Parameter.empty:
+             default = Parameter.empty
+         else:
+-            default = ast_unparse(defaults[i + posonlyargs])
++            default = ast_unparse_default(defaults[i + posonlyargs])
+ 
+         annotation = ast_unparse(arg.annotation) or Parameter.empty
+         params.append(Parameter(arg.arg, Parameter.POSITIONAL_OR_KEYWORD,
+@@ -648,7 +649,7 @@ def signature_from_ast(node: ast.FunctionDef) -> inspect.Signature:
+                                 annotation=annotation))
+ 
+     for i, arg in enumerate(args.kwonlyargs):
+-        default = ast_unparse(args.kw_defaults[i]) or Parameter.empty
++        default = ast_unparse_default(args.kw_defaults[i]) or Parameter.empty
+         annotation = ast_unparse(arg.annotation) or Parameter.empty
+         params.append(Parameter(arg.arg, Parameter.KEYWORD_ONLY, default=default,
+                                 annotation=annotation))

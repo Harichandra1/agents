@@ -1,0 +1,41 @@
+diff --git a/sphinx/ext/autodoc/__init__.py b/sphinx/ext/autodoc/__init__.py
+index f8e4be999..71bc12c9d 100644
+--- a/sphinx/ext/autodoc/__init__.py
++++ b/sphinx/ext/autodoc/__init__.py
+@@ -1062,9 +1062,35 @@ class DocstringSignatureMixin:
+                     valid_names.extend(cls.__name__ for cls in self.object.__mro__)
+             if base not in valid_names:
+                 continue
++
++            # SWIG documents overloaded methods by listing all signatures at
++            # the start of the docstring.  Keep consuming matching signatures
++            # until the first line of the docstring body.
++            signatures = [(args, retann)]
++            end = 1
++            while end < len(doclines):
++                match = py_ext_sig_re.match(doclines[end])
++                if not match:
++                    break
++                _exmod, _path, next_base, next_args, next_retann = match.groups()
++                if next_base not in valid_names:
++                    break
++                signatures.append((next_args, next_retann))
++                end += 1
++
++            # format_signature() supplies parentheses around args and accepts
++            # one return annotation.  Embed each earlier annotation in the
++            # args string so the resulting directive contains one full
++            # signature per line; the final annotation remains separate.
++            args = signatures[0][0] or ''
++            for next_args, next_retann in signatures[1:]:
++                args += ')' + ((' -> %s' % retann) if retann else '')
++                args += '\n(' + (next_args or '')
++                retann = next_retann
++
+             # re-prepare docstring to ignore more leading indentation
+             tab_width = self.directive.state.document.settings.tab_width  # type: ignore
+-            self._new_docstrings[i] = prepare_docstring('\n'.join(doclines[1:]),
++            self._new_docstrings[i] = prepare_docstring('\n'.join(doclines[end:]),
+                                                         tabsize=tab_width)
+             result = args, retann
+             # don't look any further

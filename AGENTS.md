@@ -47,6 +47,11 @@ src/harness/            the patterns (edit in place; git holds the history)
   tools/                shared tools: arithmetic, registry, stubs, scratchpad,
                         meta (search_tools/load_tools), sandboxing (Docker)
 examples/dayNN_*.py     frozen daily demos — one per pattern, `main()` + guard
+evals/runner.py         Day 15–16 custom eval (toy repo, pytest-scored)
+evals/swebench.py       Day 17 — agent on SWE-bench Mini, bash inside the instance image
+evals/grade.py          Day 17 — swebench grader wrapper; pins drifted Sphinx deps
+evals/rejudge.py        Day 17 — re-run only the best-of-N judge on saved candidates
+evals/results/          append-only run outputs (predictions, patches, trajectories)
 tests/                  offline tests; `ScriptedLLM` lives in tests/conftest.py
 docs/day-template.md    the per-day build ritual (follow it for new days)
 docs/project-structure.md  why the repo is shaped this way
@@ -86,8 +91,8 @@ non-negotiable, example optional for pure-infra days.
 
 `src/harness/settings.py` owns all settings via pydantic-settings: prefix
 `HARNESS_`, loaded from `.env` then `.env.{APP_ENV}` (later file wins,
-`APP_ENV` ∈ `dev|staging|prod`). Defaults: model `openai:gpt-5.6-luna`, routing
-model `openai:gpt-4o-mini`, temperature `0`, `reasoning_effort` `none`, prompt
+`APP_ENV` ∈ `dev|staging|prod`). Defaults: model `openai:gpt-6-luna`, routing
+model `openai:gpt-4o-mini`, temperature `0`, `reasoning_effort` `medium`, prompt
 cache off, cache key `harness-v1`. `OPENAI_API_KEY` is read unprefixed.
 
 `.env` and `.env.{dev,staging,prod}` are gitignored and hold real secrets —

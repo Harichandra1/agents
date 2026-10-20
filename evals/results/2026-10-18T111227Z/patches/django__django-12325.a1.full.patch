@@ -1,0 +1,133 @@
+diff --git a/django/db/models/base.py b/django/db/models/base.py
+index 8ea6c05ef9..2c24c7c207 100644
+--- a/django/db/models/base.py
++++ b/django/db/models/base.py
+@@ -200,11 +200,21 @@ class ModelBase(type):
+             # Skip concrete parent classes.
+             if base != new_class and not base._meta.abstract:
+                 continue
+-            # Locate OneToOneField instances.
++            # Locate OneToOneField instances which can serve as parent links.
++            # Ordinary OneToOneFields may refer to a parent model without
++            # serving as the multi-table inheritance link. Explicitly marked
++            # parent links take precedence; auto-created and primary-key fields
++            # remain candidates for compatibility with existing model states.
+             for field in base._meta.local_fields:
+-                if isinstance(field, OneToOneField):
+-                    related = resolve_relation(new_class, field.remote_field.model)
+-                    parent_links[make_model_tuple(related)] = field
++                if not isinstance(field, OneToOneField):
++                    continue
++                is_parent_link = field.remote_field.parent_link
++                if not is_parent_link and not (field.auto_created or field.primary_key):
++                    continue
++                related = resolve_relation(new_class, field.remote_field.model)
++                related_key = make_model_tuple(related)
++                if is_parent_link or related_key not in parent_links:
++                    parent_links[related_key] = field
+ 
+         # Track fields inherited from base models.
+         inherited_attributes = set()
+diff --git a/tests/invalid_models_tests/test_models.py b/tests/invalid_models_tests/test_models.py
+index 60b89b6f2e..d0d96e5807 100644
+--- a/tests/invalid_models_tests/test_models.py
++++ b/tests/invalid_models_tests/test_models.py
+@@ -3,7 +3,6 @@ import unittest
+ from django.conf import settings
+ from django.core.checks import Error, Warning
+ from django.core.checks.model_checks import _check_lazy_references
+-from django.core.exceptions import ImproperlyConfigured
+ from django.db import connection, connections, models
+ from django.db.models.functions import Lower
+ from django.db.models.signals import post_init
+@@ -1006,14 +1005,44 @@ class OtherModelTests(SimpleTestCase):
+ 
+         self.assertEqual(ShippingMethod.check(), [])
+ 
+-    def test_missing_parent_link(self):
+-        msg = 'Add parent_link=True to invalid_models_tests.ParkingLot.parent.'
+-        with self.assertRaisesMessage(ImproperlyConfigured, msg):
+-            class Place(models.Model):
+-                pass
++    def test_onetoone_with_parent_model(self):
++        class Place(models.Model):
++            pass
++
++        class ParkingLot(Place):
++            parent = models.OneToOneField(Place, models.CASCADE, related_name='something')
++
++        self.assertEqual(ParkingLot._meta.parents[Place].name, 'place_ptr')
++        self.assertEqual(ParkingLot._meta.get_field('parent').name, 'parent')
++        self.assertEqual(ParkingLot.check(), [])
++
++        class PrimaryKeyParkingLot(Place):
++            parent = models.OneToOneField(Place, models.CASCADE, primary_key=True)
++
++        self.assertEqual(PrimaryKeyParkingLot._meta.parents[Place].name, 'parent')
++
++    def test_parent_link_preferred_over_other_onetoone_fields(self):
++        class Document(models.Model):
++            pass
++
++        class PickingFirst(Document):
++            document_ptr = models.OneToOneField(
++                Document, models.CASCADE, parent_link=True, related_name='+',
++            )
++            origin = models.OneToOneField(
++                Document, models.PROTECT, related_name='+',
++            )
++
++        class PickingLast(Document):
++            origin = models.OneToOneField(
++                Document, models.PROTECT, related_name='+',
++            )
++            document_ptr = models.OneToOneField(
++                Document, models.CASCADE, parent_link=True, related_name='+',
++            )
+ 
+-            class ParkingLot(Place):
+-                parent = models.OneToOneField(Place, models.CASCADE)
++        self.assertEqual(PickingFirst._meta.parents[Document].name, 'document_ptr')
++        self.assertEqual(PickingLast._meta.parents[Document].name, 'document_ptr')
+ 
+     def test_m2m_table_name_clash(self):
+         class Foo(models.Model):
+diff --git a/tests/invalid_models_tests/test_relative_fields.py b/tests/invalid_models_tests/test_relative_fields.py
+index 4ac0c547a9..180db79c8e 100644
+--- a/tests/invalid_models_tests/test_relative_fields.py
++++ b/tests/invalid_models_tests/test_relative_fields.py
+@@ -1291,6 +1291,34 @@ class ComplexClashTests(SimpleTestCase):
+             ),
+         ])
+ 
++    def test_clash_parent_link(self):
++        class Target(models.Model):
++            clash = models.CharField(max_length=10)
++
++        class Model(Target):
++            ptr = models.OneToOneField(
++                Target, models.CASCADE, parent_link=True, related_name='clash',
++            )
++            other = models.OneToOneField(Target, models.CASCADE, related_name='+')
++
++        self.assertEqual(Model._meta.parents[Target].name, 'ptr')
++        self.assertEqual(Model.check(), [
++            Error(
++                "Reverse accessor for 'Model.ptr' clashes with field name 'Target.clash'.",
++                hint=("Rename field 'Target.clash', or add/change a related_name "
++                      "argument to the definition for field 'Model.ptr'."),
++                obj=Model._meta.get_field('ptr'),
++                id='fields.E302',
++            ),
++            Error(
++                "Reverse query name for 'Model.ptr' clashes with field name 'Target.clash'.",
++                hint=("Rename field 'Target.clash', or add/change a related_name "
++                      "argument to the definition for field 'Model.ptr'."),
++                obj=Model._meta.get_field('ptr'),
++                id='fields.E303',
++            ),
++        ])
++
+ 
+ @isolate_apps('invalid_models_tests')
+ class M2mThroughFieldsTests(SimpleTestCase):

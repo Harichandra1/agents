@@ -1,0 +1,28 @@
+diff --git a/django/db/models/fields/__init__.py b/django/db/models/fields/__init__.py
+index ee45bb941e..d9092d9616 100755
+--- a/django/db/models/fields/__init__.py
++++ b/django/db/models/fields/__init__.py
+@@ -763,8 +763,21 @@ class Field(RegisterLookupMixin):
+             if not getattr(cls, self.attname, None):
+                 setattr(cls, self.attname, self.descriptor_class(self))
+         if self.choices is not None:
+-            setattr(cls, 'get_%s_display' % self.name,
+-                    partialmethod(cls._get_FIELD_display, field=self))
++            get_display = 'get_%s_display' % self.name
++            display_method = next(
++                (base.__dict__[get_display] for base in cls.__mro__ if get_display in base.__dict__),
++                None,
++            )
++            generated_display = (
++                isinstance(display_method, partialmethod) and
++                getattr(display_method.func, '__name__', None) == '_get_FIELD_display' and
++                'field' in display_method.keywords
++            )
++            # Don't overwrite a model-defined method, but replace an inherited
++            # generated method if an abstract field is overridden.
++            if display_method is None or generated_display:
++                setattr(cls, get_display,
++                        partialmethod(cls._get_FIELD_display, field=self))
+ 
+     def get_filter_kwargs_for_object(self, obj):
+         """

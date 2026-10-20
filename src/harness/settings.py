@@ -13,10 +13,10 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
-    model: str = "openai:gpt-5.6-luna"
+    model: str = "openai:gpt-6-luna"
     routing_model: str = "openai:gpt-4o-mini"
     temperature: float = 0
-    reasoning_effort: str = "none"
+    reasoning_effort: str = "medium"
     prompt_cache_enabled: bool = False
     prompt_cache_key: str = "harness-v1"
 

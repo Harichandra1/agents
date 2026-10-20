@@ -1,0 +1,15 @@
+diff --git a/django/db/models/enums.py b/django/db/models/enums.py
+index f48143ddaf..a58b71bd3d 100644
+--- a/django/db/models/enums.py
++++ b/django/db/models/enums.py
+@@ -69,6 +69,10 @@ class Choices(enum.Enum, metaclass=ChoicesMeta):
+         return str(self.value)
+ 
+ 
++# Prevent template engines from calling the choices class as a zero-argument callable.
++Choices.do_not_call_in_templates = True
++
++
+ class IntegerChoices(int, Choices):
+     """Class for creating enumerated integer choices."""
+     pass

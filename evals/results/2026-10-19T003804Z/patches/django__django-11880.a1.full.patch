@@ -1,0 +1,22 @@
+diff --git a/django/forms/fields.py b/django/forms/fields.py
+index 03cd8af8d7..7a42c44682 100644
+--- a/django/forms/fields.py
++++ b/django/forms/fields.py
+@@ -198,6 +198,17 @@ class Field:
+     def __deepcopy__(self, memo):
+         result = copy.copy(self)
+         memo[id(self)] = result
++        error_messages_memo = memo.copy()
++        try:
++            result.error_messages = copy.deepcopy(self.error_messages, error_messages_memo)
++        except Exception:
++            # Custom error messages may not support deep copying.
++            pass
++        else:
++            keep_alive = error_messages_memo.pop(id(error_messages_memo), None)
++            if keep_alive:
++                memo.setdefault(id(memo), []).extend(keep_alive)
++            memo.update(error_messages_memo)
+         result.widget = copy.deepcopy(self.widget, memo)
+         result.validators = self.validators[:]
+         return result

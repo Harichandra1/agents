@@ -1,0 +1,37 @@
+diff --git a/django/db/models/enums.py b/django/db/models/enums.py
+index bbe362a6ab..bc14c891f3 100755
+--- a/django/db/models/enums.py
++++ b/django/db/models/enums.py
+@@ -65,11 +65,16 @@ class Choices(enum.Enum, metaclass=ChoicesMeta):
+ 
+ class IntegerChoices(int, Choices):
+     """Class for creating enumerated integer choices."""
+-    pass
++
++    def __str__(self):
++        return str(self.value)
+ 
+ 
+ class TextChoices(str, Choices):
+     """Class for creating enumerated string choices."""
+ 
++    def __str__(self):
++        return str(self.value)
++
+     def _generate_next_value_(name, start, count, last_values):
+         return name
+diff --git a/tests/model_enums/tests.py b/tests/model_enums/tests.py
+index 6b4bd6e7fd..3d1912c658 100755
+--- a/tests/model_enums/tests.py
++++ b/tests/model_enums/tests.py
+@@ -41,6 +41,10 @@ class Gender(models.TextChoices):
+ 
+ 
+ class ChoicesTests(SimpleTestCase):
++    def test_str(self):
++        self.assertEqual(str(Suit.DIAMOND), '1')
++        self.assertEqual(str(YearInSchool.FRESHMAN), 'FR')
++
+     def test_integerchoices(self):
+         self.assertEqual(Suit.choices, [(1, 'Diamond'), (2, 'Spade'), (3, 'Heart'), (4, 'Club')])
+         self.assertEqual(Suit.labels, ['Diamond', 'Spade', 'Heart', 'Club'])

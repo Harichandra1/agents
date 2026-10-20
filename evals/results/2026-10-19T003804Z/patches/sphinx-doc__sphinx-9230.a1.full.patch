@@ -1,0 +1,59 @@
+diff --git a/sphinx/util/docfields.py b/sphinx/util/docfields.py
+index 3a3367ebe..dba0be4b9 100644
+--- a/sphinx/util/docfields.py
++++ b/sphinx/util/docfields.py
+@@ -35,6 +35,45 @@ def _is_single_paragraph(node: nodes.field_body) -> bool:
+     return False
+ 
+ 
++def _split_type_and_name(fieldarg: str) -> Tuple[str, str]:
++    """Split a typed field argument into its type and argument name.
++
++    Type expressions can contain whitespace inside parentheses, brackets or
++    braces (for example, ``dict(str, str)``).  Only whitespace outside those
++    groups separates the type from the argument name.
++    """
++    brackets = []
++    closing_brackets = {')': '(', ']': '[', '}': '{'}
++    quote = None
++    escaped = False
++    for index, char in enumerate(fieldarg):
++        if quote:
++            if escaped:
++                escaped = False
++            elif char == '\\':
++                escaped = True
++            elif char == quote:
++                quote = None
++        elif char in ('"', "'"):
++            quote = char
++        elif char in '([{':
++            brackets.append(char)
++        elif char in ')]}':
++            if not brackets or brackets.pop() != closing_brackets[char]:
++                break
++        elif char.isspace() and not brackets:
++            argname = fieldarg[index:].lstrip()
++            if index > 0 and argname:
++                return fieldarg[:index], argname
++            break
++
++    # Preserve the existing behavior for malformed/incomplete type expressions.
++    parts = fieldarg.split(None, 1)
++    if len(parts) == 2:
++        return parts[0], parts[1]
++    raise ValueError
++
++
+ class Field:
+     """A doc field that is never grouped.  It can have an argument or not, the
+     argument can be linked using a specified *rolename*.  Field should be used
+@@ -298,7 +337,7 @@ class DocFieldTransformer:
+             # also support syntax like ``:param type name:``
+             if typedesc.is_typed:
+                 try:
+-                    argtype, argname = fieldarg.split(None, 1)
++                    argtype, argname = _split_type_and_name(fieldarg)
+                 except ValueError:
+                     pass
+                 else:

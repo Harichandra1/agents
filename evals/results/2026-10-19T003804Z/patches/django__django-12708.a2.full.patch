@@ -1,0 +1,54 @@
+diff --git a/django/db/backends/base/schema.py b/django/db/backends/base/schema.py
+index 61f88401ab..0944963ccb 100755
+--- a/django/db/backends/base/schema.py
++++ b/django/db/backends/base/schema.py
+@@ -393,7 +393,9 @@ class BaseDatabaseSchemaEditor:
+         news = {tuple(fields) for fields in new_index_together}
+         # Deleted indexes
+         for fields in olds.difference(news):
+-            self._delete_composed_index(model, fields, {'index': True}, self.sql_delete_index)
++            self._delete_composed_index(
++                model, fields, {'index': True, 'unique': False}, self.sql_delete_index,
++            )
+         # Created indexes
+         for field_names in news.difference(olds):
+             fields = [model._meta.get_field(field) for field in field_names]
+diff --git a/tests/migrations/test_operations.py b/tests/migrations/test_operations.py
+index 55c20213b0..c23f315f18 100755
+--- a/tests/migrations/test_operations.py
++++ b/tests/migrations/test_operations.py
+@@ -1759,6 +1759,34 @@ class OperationTests(OperationTestBase):
+         operation = migrations.AlterIndexTogether("Pony", None)
+         self.assertEqual(operation.describe(), "Alter index_together for Pony (0 constraint(s))")
+ 
++    def test_alter_index_together_remove_with_unique_together(self):
++        project_state = self.set_up_test_model(
++            "test_alintoun", unique_together=True, index_together=True,
++        )
++        # The test model's default index_together uses the reverse field order.
++        # First put it in the same order as unique_together to reproduce the clash.
++        operation = migrations.AlterIndexTogether("Pony", [('pink', 'weight')])
++        intermediate_state = project_state.clone()
++        operation.state_forwards("test_alintoun", intermediate_state)
++        with connection.schema_editor() as editor:
++            operation.database_forwards("test_alintoun", editor, project_state, intermediate_state)
++        project_state = intermediate_state
++
++        operation = migrations.AlterIndexTogether("Pony", [])
++        new_state = project_state.clone()
++        operation.state_forwards("test_alintoun", new_state)
++        with connection.schema_editor() as editor:
++            operation.database_forwards("test_alintoun", editor, project_state, new_state)
++        # Removing index_together must leave the unique_together index intact.
++        with connection.cursor() as cursor:
++            constraints = connection.introspection.get_constraints(cursor, "test_alintoun_pony")
++        matching_constraints = [
++            constraint for constraint in constraints.values()
++            if constraint['columns'] == ['pink', 'weight']
++        ]
++        self.assertEqual(len(matching_constraints), 1)
++        self.assertTrue(matching_constraints[0]['unique'])
++
+     @skipUnlessDBFeature('supports_table_check_constraints')
+     def test_add_constraint(self):
+         project_state = self.set_up_test_model("test_addconstraint")

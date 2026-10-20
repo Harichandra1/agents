@@ -1,0 +1,30 @@
+diff --git a/django/db/models/base.py b/django/db/models/base.py
+index e3b14a41a0..02e2690b59 100644
+--- a/django/db/models/base.py
++++ b/django/db/models/base.py
+@@ -849,7 +849,10 @@ class Model(metaclass=ModelBase):
+         updated = False
+         # Skip an UPDATE when adding an instance and primary key has a default.
+         if (
++            not raw and
+             not force_insert and
++            not force_update and
++            not update_fields and
+             self._state.adding and
+             self._meta.pk.default and
+             self._meta.pk.default is not NOT_PROVIDED
+diff --git a/docs/ref/models/instances.txt b/docs/ref/models/instances.txt
+index 9345bc0fe0..a45314f659 100644
+--- a/docs/ref/models/instances.txt
++++ b/docs/ref/models/instances.txt
+@@ -510,6 +510,10 @@ only.
+ 
+ Using ``update_fields`` will force an update similarly to ``force_update``.
+ 
++When a model's primary key has a default, saving a new instance with its
++primary key set always attempts an ``INSERT``. If you want to update a row
++with that primary key, use ``save(force_update=True)``.
++
+ .. _ref-models-field-updates-using-f-expressions:
+ 
+ Updating attributes based on existing fields

@@ -1,0 +1,39 @@
+diff --git a/django/db/models/base.py b/django/db/models/base.py
+index 844c01e95e..dead669cad 100644
+--- a/django/db/models/base.py
++++ b/django/db/models/base.py
+@@ -569,6 +569,18 @@ class Model(metaclass=ModelBase):
+         return getattr(self, meta.pk.attname)
+ 
+     def _set_pk_val(self, value):
++        # _meta.parents contains only direct parents. Update each ancestor link
++        # so saving an instance with a reset PK creates new parent rows too.
++        parent_models = [self._meta.concrete_model] + self._meta.get_parent_list()
++        for parent_model in parent_models:
++            for parent_link in parent_model._meta.parents.values():
++                if parent_link:
++                    setattr(self, parent_link.target_field.attname, value)
++                    if value is None:
++                        # Don't let _save_parents() restore the previous parent PK.
++                        setattr(self, parent_link.attname, None)
++                        if parent_link.is_cached(self):
++                            parent_link.delete_cached_value(self)
+         return setattr(self, self._meta.pk.attname, value)
+ 
+     pk = property(_get_pk_val, _set_pk_val)
+diff --git a/docs/topics/db/queries.txt b/docs/topics/db/queries.txt
+index 79f38084fa..135d2e9d8f 100644
+--- a/docs/topics/db/queries.txt
++++ b/docs/topics/db/queries.txt
+@@ -971,10 +971,9 @@ Things get more complicated if you use inheritance. Consider a subclass of
+     django_blog = ThemeBlog(name='Django', tagline='Django is easy', theme='python')
+     django_blog.save() # django_blog.pk == 3
+ 
+-Due to how inheritance works, you have to set both ``pk`` and ``id`` to None::
++Setting ``pk`` to ``None`` also clears the primary keys of the parent models::
+ 
+     django_blog.pk = None
+-    django_blog.id = None
+     django_blog.save() # django_blog.pk == 4
+ 
+ This process doesn't copy relations that aren't part of the model's database

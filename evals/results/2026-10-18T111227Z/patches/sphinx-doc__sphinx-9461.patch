@@ -1,0 +1,162 @@
+diff --git a/doc/usage/restructuredtext/domains.rst b/doc/usage/restructuredtext/domains.rst
+index 23844886e..c8127eeb7 100644
+--- a/doc/usage/restructuredtext/domains.rst
++++ b/doc/usage/restructuredtext/domains.rst
+@@ -329,6 +329,11 @@ The following directives are provided for module and class contents:
+ 
+       Indicate the property is abstract.
+ 
++   .. rst:directive:option:: classmethod
++      :type: no value
++
++      Indicate the property is a class property.
++
+    .. rst:directive:option:: type: type of the property
+       :type: text
+ 
+diff --git a/sphinx/domains/python.py b/sphinx/domains/python.py
+index d79de154e..4ae2ff623 100644
+--- a/sphinx/domains/python.py
++++ b/sphinx/domains/python.py
+@@ -852,6 +852,7 @@ class PyProperty(PyObject):
+     option_spec = PyObject.option_spec.copy()
+     option_spec.update({
+         'abstractmethod': directives.flag,
++        'classmethod': directives.flag,
+         'type': directives.unchanged,
+     })
+ 
+@@ -865,9 +866,12 @@ class PyProperty(PyObject):
+         return fullname, prefix
+ 
+     def get_signature_prefix(self, sig: str) -> str:
+-        prefix = ['property']
++        prefix = []
+         if 'abstractmethod' in self.options:
+-            prefix.insert(0, 'abstract')
++            prefix.append('abstract')
++        if 'classmethod' in self.options:
++            prefix.append('classmethod')
++        prefix.append('property')
+ 
+         return ' '.join(prefix) + ' '
+ 
+@@ -883,7 +887,10 @@ class PyProperty(PyObject):
+             else:
+                 return name
+ 
+-        return _('%s (%s property)') % (attrname, clsname)
++        if 'classmethod' in self.options:
++            return _('%s (%s class property)') % (attrname, clsname)
++        else:
++            return _('%s (%s property)') % (attrname, clsname)
+ 
+ 
+ class PyDecoratorMixin:
+diff --git a/sphinx/ext/autodoc/__init__.py b/sphinx/ext/autodoc/__init__.py
+index 1cecb1f79..5f633fa2f 100644
+--- a/sphinx/ext/autodoc/__init__.py
++++ b/sphinx/ext/autodoc/__init__.py
+@@ -12,7 +12,7 @@
+ 
+ import re
+ import warnings
+-from inspect import Parameter, Signature
++from inspect import Parameter, Signature, getattr_static
+ from types import ModuleType
+ from typing import (TYPE_CHECKING, Any, Callable, Dict, Iterator, List, Optional, Sequence,
+                     Set, Tuple, Type, TypeVar, Union)
+@@ -2675,6 +2675,12 @@ class PropertyDocumenter(DocstringStripSignatureMixin, ClassLevelDocumenter):  #
+         sourcename = self.get_sourcename()
+         if inspect.isabstractmethod(self.object):
+             self.add_line('   :abstractmethod:', sourcename)
++        try:
++            descriptor = getattr_static(self.parent, self.object_name, None)
++        except Exception:
++            descriptor = None
++        if inspect.isclassmethodproperty(descriptor):
++            self.add_line('   :classmethod:', sourcename)
+ 
+         if safe_getattr(self.object, 'fget', None) and self.config.autodoc_typehints != 'none':
+             try:
+diff --git a/sphinx/ext/autodoc/importer.py b/sphinx/ext/autodoc/importer.py
+index 1a8ea0973..6e42e353b 100644
+--- a/sphinx/ext/autodoc/importer.py
++++ b/sphinx/ext/autodoc/importer.py
+@@ -9,6 +9,7 @@
+ """
+ 
+ import importlib
++import inspect as py_inspect
+ import traceback
+ import warnings
+ from typing import Any, Callable, Dict, List, NamedTuple, Optional, Tuple
+@@ -17,8 +18,8 @@ from sphinx.deprecation import RemovedInSphinx50Warning
+ from sphinx.ext.autodoc.mock import ismock, undecorate
+ from sphinx.pycode import ModuleAnalyzer, PycodeError
+ from sphinx.util import logging
+-from sphinx.util.inspect import (getannotations, getmro, getslots, isclass, isenumclass,
+-                                 safe_getattr)
++from sphinx.util.inspect import (getannotations, getmro, getslots, isclass,
++                                 isclassmethodproperty, isenumclass, safe_getattr)
+ 
+ if False:
+     # For type annotation
+@@ -59,6 +60,20 @@ def unmangle(subject: Any, name: str) -> Optional[str]:
+     return name
+ 
+ 
++def _unwrap_classmethod_property(parent: Any, name: str, value: Any) -> Any:
++    """Return the wrapped property instead of the value it computes."""
++    if isclass(parent):
++        try:
++            descriptor = py_inspect.getattr_static(parent, name, None)
++            if isclassmethodproperty(descriptor):
++                return descriptor.__func__
++        except Exception:
++            # Fall back to the value returned by attrgetter for unusual classes.
++            pass
++
++    return value
++
++
+ def import_module(modname: str, warningiserror: bool = False) -> Any:
+     """
+     Call importlib.import_module(modname), convert exceptions to ImportError
+@@ -108,6 +123,7 @@ def import_object(modname: str, objpath: List[str], objtype: str = '',
+             logger.debug('[autodoc] getattr(_, %r)', attrname)
+             mangled_name = mangle(obj, attrname)
+             obj = attrgetter(obj, mangled_name)
++            obj = _unwrap_classmethod_property(parent, mangled_name, obj)
+ 
+             try:
+                 logger.debug('[autodoc] => %r', obj)
+@@ -275,6 +291,9 @@ def get_class_members(subject: Any, objpath: List[str], attrgetter: Callable
+     for name in dir(subject):
+         try:
+             value = attrgetter(subject, name)
++            # A classmethod wrapping a property is evaluated by getattr() on
++            # Python 3.9+, so retain the wrapped property for autodoc.
++            value = _unwrap_classmethod_property(subject, name, value)
+             if ismock(value):
+                 value = undecorate(value)
+ 
+diff --git a/sphinx/util/inspect.py b/sphinx/util/inspect.py
+index 23dd9e930..af6bcd6b9 100644
+--- a/sphinx/util/inspect.py
++++ b/sphinx/util/inspect.py
+@@ -393,6 +393,14 @@ def isproperty(obj: Any) -> bool:
+     return isinstance(obj, property)
+ 
+ 
++def isclassmethodproperty(obj: Any) -> bool:
++    """Check if the object is a classmethod wrapping a property."""
++    try:
++        return isinstance(obj, classmethod) and isinstance(obj.__func__, property)
++    except Exception:
++        return False
++
++
+ def isgenericalias(obj: Any) -> bool:
+     """Check if the object is GenericAlias."""
+     if (hasattr(typing, '_GenericAlias') and  # only for py37+
